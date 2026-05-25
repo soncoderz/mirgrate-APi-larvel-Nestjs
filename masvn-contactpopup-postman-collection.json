@@ -1,0 +1,1076 @@
+{
+	"info": {
+		"_postman_id": "masvn-contactpopup-api-collection",
+		"name": "MASVN ContactPopup Backend API",
+		"description": "Bộ sưu tập API đầy đủ của hệ thống masvn-contactpopup-backend (Laravel 12).\n\n## Authentication\n- **jwt.auth**: Bearer Token trong header Authorization\n- **jwt.or.header**: Bearer Token HOẶC X-Custom-Token header (MD5 của secret)\n\n## Base URL\n- Local: http://localhost:8000/api\n\n## Cách sử dụng\n1. Gọi API `/api/v1/login` để lấy token\n2. Token sẽ tự động set vào biến `{{jwt_token}}`\n3. Các API yêu cầu auth sẽ tự dùng token này",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{jwt_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "x_custom_token",
+			"value": "",
+			"type": "string",
+			"description": "MD5 hash của group secret, dùng cho connector APIs"
+		},
+		{
+			"key": "group_secret",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "group_id",
+			"value": "1",
+			"type": "string"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		}
+	],
+	"item": [
+		{
+			"name": "🔐 1. Users - Public (Không cần Auth)",
+			"description": "Các API Users không cần xác thực",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.success && jsonData.success.token) {",
+									"    pm.collectionVariables.set('jwt_token', jsonData.success.token);",
+									"    console.log('Token saved:', jsonData.success.token.substring(0, 30) + '...');",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"123456\",\n    \"remember_token\": false\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/login",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "login"]
+						},
+						"description": "Đăng nhập hệ thống. Token JWT sẽ tự động lưu vào biến `jwt_token`.\n\n**Response**: `{ success: { token, user, group, group_hotline, privilege, user_log, queue_name, agents_view } }`"
+					}
+				},
+				{
+					"name": "Login v2",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.success && jsonData.success.token) {",
+									"    pm.collectionVariables.set('jwt_token', jsonData.success.token);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"123456\",\n    \"remember_token\": false\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/loginv2",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "loginv2"]
+						},
+						"description": "Login phiên bản 2 (⚠️ BUG: route loginv2 gọi method loginv3)"
+					}
+				},
+				{
+					"name": "Login External",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.success && jsonData.success.token) {",
+									"    pm.collectionVariables.set('jwt_token', jsonData.success.token);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"admin@example.com\",\n    \"password\": \"123456\",\n    \"remember_token\": false,\n    \"token\": \"\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/loginExternal",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "loginExternal"]
+						},
+						"description": "Login từ bên ngoài. Có thể truyền `token` thay vì username/password."
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"id\": 1\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/logout",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "logout"]
+						},
+						"description": "Đăng xuất. `id` là id của user_log record."
+					}
+				},
+				{
+					"name": "Logout v2",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"id\": 1\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/logoutv2",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "logoutv2"]
+						}
+					}
+				},
+				{
+					"name": "Forgot Password",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/forgotPassword",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "forgotPassword"]
+						},
+						"description": "Gửi email khôi phục mật khẩu"
+					}
+				},
+				{
+					"name": "Check Token",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"{{jwt_token}}\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/checkToken",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "checkToken"]
+						},
+						"description": "Kiểm tra tính hợp lệ của JWT token"
+					}
+				},
+				{
+					"name": "Check Recaptcha",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"recaptcha_token\": \"google_recaptcha_token_here\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/checkRecaptcha",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "checkRecaptcha"]
+						},
+						"description": "Xác thực Google reCAPTCHA"
+					}
+				},
+				{
+					"name": "Change Password Forgot",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"remember_token_hash\",\n    \"email\": \"user@example.com\",\n    \"password\": \"new_password_123\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/changePasswordForgot",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "changePasswordForgot"]
+						},
+						"description": "Đổi mật khẩu sau khi quên (dùng token từ email)"
+					}
+				},
+				{
+					"name": "Get User Token",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"123456\",\n    \"remember_token\": false\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/getUserToken",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "getUserToken"]
+						},
+						"description": "Lấy JWT token cho user (dùng username + password)"
+					}
+				},
+				{
+					"name": "Add User As Company",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstName\": \"Nguyen\",\n    \"lastName\": \"Van A\",\n    \"email\": \"newuser@company.com\",\n    \"password\": \"123456\",\n    \"confirmPassword\": \"123456\",\n    \"groupName\": \"TenGroupMoi\",\n    \"typeId\": 1,\n    \"role\": \"admin\",\n    \"status\": \"active\",\n    \"mobile\": \"0909123456\",\n    \"phone\": \"02812345678\",\n    \"address\": \"HCM\",\n    \"note\": \"\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/addUserAsCompany",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "addUserAsCompany"]
+						},
+						"description": "Đăng ký tài khoản công ty mới (tạo Group + User admin)"
+					}
+				},
+				{
+					"name": "Add User By Excel",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{ "key": "file", "type": "file", "src": "", "description": "File Excel chứa danh sách users" },
+								{ "key": "groupId", "value": "{{group_id}}", "type": "text" }
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/addUserByExcel",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "addUserByExcel"]
+						},
+						"description": "Import users từ file Excel"
+					}
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"new_password\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/resetPassword",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "resetPassword"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🔒 2. Users - Auth Required (jwt.auth)",
+			"description": "Các API Users cần JWT token",
+			"auth": {
+				"type": "bearer",
+				"bearer": [{ "key": "token", "value": "{{jwt_token}}", "type": "string" }]
+			},
+			"item": [
+				{
+					"name": "Get Current User (me)",
+					"request": {
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/me", "host": ["{{base_url}}"], "path": ["v1", "me"] }
+					}
+				},
+				{
+					"name": "Get Users (List with pagination)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"groupId\": null,\n    \"departmentId\": null,\n    \"typeId\": null,\n    \"roleId\": null,\n    \"search\": \"\",\n    \"filters\": [],\n    \"sorts\": [],\n    \"recordsOnPage\": 10,\n    \"current_page\": 1\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/v1/users", "host": ["{{base_url}}"], "path": ["v1", "users"] },
+						"description": "Lấy danh sách users với phân trang, tìm kiếm, lọc, sắp xếp"
+					}
+				},
+				{
+					"name": "Get Users By Role",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"filter\": [\n        {\n            \"name\": \"RoleByUser\",\n            \"condition\": \"=\",\n            \"value\": \"admin\"\n        }\n    ]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/v1/usersByRole", "host": ["{{base_url}}"], "path": ["v1", "usersByRole"] },
+						"description": "Lấy users theo role. Filter values: superadmin, admin, agent"
+					}
+				},
+				{
+					"name": "Get User Info By Extension",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"extensions\": \"1001,1002,1003\",\n    \"secret\": \"\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/v1/usersByExt", "host": ["{{base_url}}"], "path": ["v1", "usersByExt"] },
+						"description": "Lấy thông tin user theo số extension (comma-separated)"
+					}
+				},
+				{
+					"name": "Get User By ID",
+					"request": {
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/user/{{user_id}}", "host": ["{{base_url}}"], "path": ["v1", "user", "{{user_id}}"] }
+					}
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{ "key": "id", "value": "1", "type": "text" },
+								{ "key": "firstName", "value": "Nguyen", "type": "text" },
+								{ "key": "lastName", "value": "Van A", "type": "text" },
+								{ "key": "email", "value": "user@example.com", "type": "text" },
+								{ "key": "password", "value": "", "type": "text", "description": "Để trống nếu không đổi" },
+								{ "key": "role", "value": "agent", "type": "text", "description": "agent|admin|superadmin|supervisor|manager" },
+								{ "key": "status", "value": "active", "type": "text", "description": "active|lock|pending|trash" },
+								{ "key": "groupId", "value": "{{group_id}}", "type": "text" },
+								{ "key": "extension", "value": "1001", "type": "text" },
+								{ "key": "queues", "value": "", "type": "text" },
+								{ "key": "extensions_view", "value": "", "type": "text" },
+								{ "key": "departmentId", "value": "", "type": "text" },
+								{ "key": "typeId", "value": "1", "type": "text" },
+								{ "key": "mobile", "value": "", "type": "text" },
+								{ "key": "phone", "value": "", "type": "text" },
+								{ "key": "address", "value": "", "type": "text" },
+								{ "key": "note", "value": "", "type": "text" },
+								{ "key": "is_hotdesk", "value": "0", "type": "text" },
+								{ "key": "transports", "value": "", "type": "text" },
+								{ "key": "port", "value": "", "type": "text" },
+								{ "key": "is_google2fa", "value": "", "type": "text" },
+								{ "key": "avatar", "type": "file", "src": "", "description": "File ảnh avatar (jpg,png,bmp,gif,svg)" }
+							]
+						},
+						"url": { "raw": "{{base_url}}/v1/updateUser", "host": ["{{base_url}}"], "path": ["v1", "updateUser"] },
+						"description": "Cập nhật thông tin user. Hỗ trợ upload avatar qua form-data."
+					}
+				},
+				{
+					"name": "Update User Info By Field",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Accept", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": 1,\n    \"is_webRTC\": 1,\n    \"is_receive_chat\": 0\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/v1/updateUserInfoByField", "host": ["{{base_url}}"], "path": ["v1", "updateUserInfoByField"] },
+						"description": "Cập nhật nhanh 1 field (is_webRTC hoặc is_receive_chat)"
+					}
+				},
+				{
+					"name": "Add User As Member Of Company",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{ "key": "firstName", "value": "Tran", "type": "text" },
+								{ "key": "lastName", "value": "Van B", "type": "text" },
+								{ "key": "email", "value": "member@company.com", "type": "text" },
+								{ "key": "password", "value": "123456", "type": "text" },
+								{ "key": "confirmPassword", "value": "123456", "type": "text" },
+								{ "key": "groupId", "value": "{{group_id}}", "type": "text" },
+								{ "key": "role", "value": "agent", "type": "text" },
+								{ "key": "status", "value": "active", "type": "text" },
+								{ "key": "extension", "value": "1002", "type": "text" },
+								{ "key": "queues", "value": "", "type": "text" },
+								{ "key": "typeId", "value": "1", "type": "text" },
+								{ "key": "departmentId", "value": "", "type": "text" },
+								{ "key": "mobile", "value": "", "type": "text" },
+								{ "key": "avatar", "type": "file", "src": "" }
+							]
+						},
+						"url": { "raw": "{{base_url}}/v1/addUserAsMemberOfCompany", "host": ["{{base_url}}"], "path": ["v1", "addUserAsMemberOfCompany"] },
+						"description": "Thêm user vào group/company đã tồn tại"
+					}
+				},
+				{
+					"name": "Get User Name By Agents View",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getUserNameByAgentsView", "host": ["{{base_url}}"], "path": ["v1", "getUserNameByAgentsView"] }
+					}
+				},
+				{
+					"name": "Get User Module Show",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getUserModuleShow", "host": ["{{base_url}}"], "path": ["v1", "getUserModuleShow"] }
+					}
+				},
+				{
+					"name": "Get Users By Group Id",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getUsersByGroupId", "host": ["{{base_url}}"], "path": ["v1", "getUsersByGroupId"] }
+					}
+				},
+				{
+					"name": "Get History",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getHistory", "host": ["{{base_url}}"], "path": ["v1", "getHistory"] }
+					}
+				},
+				{
+					"name": "Duplicate Privilege",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/duplicatePrivilege", "host": ["{{base_url}}"], "path": ["v1", "duplicatePrivilege"] }
+					}
+				},
+				{
+					"name": "Export Privilege",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/exportPrivilege", "host": ["{{base_url}}"], "path": ["v1", "exportPrivilege"] }
+					}
+				},
+				{
+					"name": "Unset User Avatar",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/unsetUserAvatar", "host": ["{{base_url}}"], "path": ["v1", "unsetUserAvatar"] }
+					}
+				},
+				{
+					"name": "Get Config Trunk PDS",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getConfigTrunkPDS", "host": ["{{base_url}}"], "path": ["v1", "getConfigTrunkPDS"] }
+					}
+				},
+				{
+					"name": "Insert Config Trunk PDS",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"trunk\": \"trunk_name\",\n    \"prefix\": \"0\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/insertConfigTrunkPDS", "host": ["{{base_url}}"], "path": ["v1", "insertConfigTrunkPDS"] }
+					}
+				},
+				{
+					"name": "Update Config Trunk PDS",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"trunk\": \"trunk_name_updated\",\n    \"prefix\": \"0\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/updateConfigTrunkPDS", "host": ["{{base_url}}"], "path": ["v1", "updateConfigTrunkPDS"] }
+					}
+				},
+				{
+					"name": "Delete Config Trunk PDS",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteConfigTrunkPDS", "host": ["{{base_url}}"], "path": ["v1", "deleteConfigTrunkPDS"] }
+					}
+				},
+				{
+					"name": "Get BlackList",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getBlackList", "host": ["{{base_url}}"], "path": ["v1", "getBlackList"] }
+					}
+				},
+				{
+					"name": "Insert BlackList",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"phone\": \"0909123456\",\n    \"note\": \"Spam caller\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/insertBlackList", "host": ["{{base_url}}"], "path": ["v1", "insertBlackList"] }
+					}
+				},
+				{
+					"name": "Update BlackList",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"phone\": \"0909123456\",\n    \"note\": \"Updated note\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/updateBlackList", "host": ["{{base_url}}"], "path": ["v1", "updateBlackList"] }
+					}
+				},
+				{
+					"name": "Delete BlackList",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteBlackList", "host": ["{{base_url}}"], "path": ["v1", "deleteBlackList"] }
+					}
+				},
+				{
+					"name": "Import BlackList",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{ "key": "file", "type": "file", "src": "" }
+							]
+						},
+						"url": { "raw": "{{base_url}}/v1/importBlackList", "host": ["{{base_url}}"], "path": ["v1", "importBlackList"] }
+					}
+				},
+				{
+					"name": "Get User Team",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getUserTeam", "host": ["{{base_url}}"], "path": ["v1", "getUserTeam"] }
+					}
+				},
+				{
+					"name": "Upsert User Team",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": null,\n    \"name\": \"Team A\",\n    \"members\": [1, 2, 3]\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/UpsertUserTeam", "host": ["{{base_url}}"], "path": ["v1", "UpsertUserTeam"] }
+					}
+				},
+				{
+					"name": "Delete Team",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteTeam", "host": ["{{base_url}}"], "path": ["v1", "deleteTeam"] }
+					}
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteUser", "host": ["{{base_url}}"], "path": ["v1", "deleteUser"] },
+						"description": "Soft delete (set status = 'trash')"
+					}
+				},
+				{
+					"name": "Delete Users (Bulk)",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"list\": [1, 2, 3]\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteUsers", "host": ["{{base_url}}"], "path": ["v1", "deleteUsers"] },
+						"description": "Soft delete nhiều users cùng lúc"
+					}
+				},
+				{
+					"name": "Duplicate User",
+					"request": {
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/duplicateUser/1", "host": ["{{base_url}}"], "path": ["v1", "duplicateUser", "1"] }
+					}
+				},
+				{
+					"name": "Get User Logs",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupid\": \"{{group_id}}\",\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"email\": \"\",\n    \"search\": \"\",\n    \"sort\": null,\n    \"recordsOnPage\": 50,\n    \"exportExcel\": false\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/getUserLogs", "host": ["{{base_url}}"], "path": ["v1", "getUserLogs"] },
+						"description": "Lấy lịch sử đăng nhập/đăng xuất. Set exportExcel=true để xuất Excel."
+					}
+				},
+				{
+					"name": "Delete User Log",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/deleteUserLog", "host": ["{{base_url}}"], "path": ["v1", "deleteUserLog"] }
+					}
+				},
+				{
+					"name": "Logout User Manual",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/logoutUserManual", "host": ["{{base_url}}"], "path": ["v1", "logoutUserManual"] }
+					}
+				},
+				{
+					"name": "Get User Logs By Group ID",
+					"request": {
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/getuserLogsByGroupId/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "getuserLogsByGroupId", "{{group_id}}"] }
+					}
+				},
+				{
+					"name": "Export Users",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/exportUsers", "host": ["{{base_url}}"], "path": ["v1", "exportUsers"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "👥 3. Groups - Public",
+			"description": "Các API Groups không cần auth",
+			"item": [
+				{
+					"name": "Get Group By Secret",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/groupBySecret/{{group_secret}}", "host": ["{{base_url}}"], "path": ["v1", "groupBySecret", "{{group_secret}}"] }
+					}
+				},
+				{
+					"name": "Get Extension Queue By Secret",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/getExtensionQueueBySecret/{{group_secret}}", "host": ["{{base_url}}"], "path": ["v1", "getExtensionQueueBySecret", "{{group_secret}}"] }
+					}
+				},
+				{
+					"name": "Get Queue By Secret",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/getQueueBySecret/{{group_secret}}", "host": ["{{base_url}}"], "path": ["v1", "getQueueBySecret", "{{group_secret}}"] }
+					}
+				},
+				{
+					"name": "Add Extension By Group",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }],
+						"body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"extensions\": \"1001,1002\"\n}", "options": { "raw": { "language": "json" } } },
+						"url": { "raw": "{{base_url}}/v1/addExtensionByGroup", "host": ["{{base_url}}"], "path": ["v1", "addExtensionByGroup"] }
+					}
+				},
+				{
+					"name": "Get Extension Name By Secret",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": { "raw": "{{base_url}}/v1/getExtensionNameBySecret/{{group_secret}}", "host": ["{{base_url}}"], "path": ["v1", "getExtensionNameBySecret", "{{group_secret}}"] }
+					}
+				},
+				{
+					"name": "Cronjob Scan File Download",
+					"request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/files/cronjobScanFileDownload", "host": ["{{base_url}}"], "path": ["v1", "files", "cronjobScanFileDownload"] } }
+				},
+				{
+					"name": "Cronjob Daily Logout Queue PDS",
+					"request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/cronjobDailyLogoutQueuePDS", "host": ["{{base_url}}"], "path": ["v1", "cronjobDailyLogoutQueuePDS"] } }
+				},
+				{
+					"name": "Cronjob Report Summary Half Day",
+					"request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/cronjobReportSummaryHalfDay", "host": ["{{base_url}}"], "path": ["v1", "cronjobReportSummaryHalfDay"] } }
+				},
+				{
+					"name": "Scan Update Cause Code",
+					"request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/scanUpdateCauseCode", "host": ["{{base_url}}"], "path": ["v1", "scanUpdateCauseCode"] } }
+				}
+			]
+		},
+		{
+			"name": "🔒 4. Groups - Auth Required",
+			"description": "Các API Groups cần JWT token. Bao gồm quản lý group, department, modules.",
+			"item": [
+				{ "name": "Read Config Modules", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/readConfigModules", "host": ["{{base_url}}"], "path": ["v1", "readConfigModules"] } } },
+				{ "name": "Write Config Modules", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"config\": {}\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/writeConfigModules", "host": ["{{base_url}}"], "path": ["v1", "writeConfigModules"] } } },
+				{ "name": "Groups With Page", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"sorts\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/groupsWithPage", "host": ["{{base_url}}"], "path": ["v1", "groupsWithPage"] } } },
+				{ "name": "Groups With Page v2", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"sorts\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/groupsWithPagev2", "host": ["{{base_url}}"], "path": ["v1", "groupsWithPagev2"] } } },
+				{ "name": "Groups With Page v3", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"sorts\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/groupsWithPagev3", "host": ["{{base_url}}"], "path": ["v1", "groupsWithPagev3"] } } },
+				{ "name": "Get Group Info v2", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/getGroupInfov2", "host": ["{{base_url}}"], "path": ["v1", "getGroupInfov2"] } } },
+				{ "name": "Get Groups (all)", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/groups", "host": ["{{base_url}}"], "path": ["v1", "groups"] } } },
+				{ "name": "Get Group By ID", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/group/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "group", "{{group_id}}"] } } },
+				{ "name": "Add Group Hotline", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"hotline_number\": \"19001234\",\n    \"queues\": \"queue1,queue2\",\n    \"extensions\": \"1001,1002\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addGrouphotline", "host": ["{{base_url}}"], "path": ["v1", "addGrouphotline"] } } },
+				{ "name": "Get Hotline", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/getHotline/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "getHotline", "{{group_id}}"] } } },
+				{ "name": "Add Group", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupName\": \"New Group\",\n    \"limitUser\": 50,\n    \"status\": \"publish\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addGroup", "host": ["{{base_url}}"], "path": ["v1", "addGroup"] } } },
+				{ "name": "Update Group", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupName\": \"Updated Group\",\n    \"limitUser\": 100,\n    \"status\": \"publish\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateGroup/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "updateGroup", "{{group_id}}"] } } },
+				{ "name": "Get Extension By Group", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/getExtensionByGroup/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "getExtensionByGroup", "{{group_id}}"] } } },
+				{ "name": "Update Webhook", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"webhook_url\": \"https://example.com/webhook\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updatewebhook", "host": ["{{base_url}}"], "path": ["v1", "updatewebhook"] } } },
+				{ "name": "Update Config SMS", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"sms_config\": {}\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateConfigSMS", "host": ["{{base_url}}"], "path": ["v1", "updateConfigSMS"] } } },
+				{ "name": "Update Config Dashboard", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"config_dashboard\": {}\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateConfigDashboard", "host": ["{{base_url}}"], "path": ["v1", "updateConfigDashboard"] } } },
+				{ "name": "Duplicate Group", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/duplicateGroup", "host": ["{{base_url}}"], "path": ["v1", "duplicateGroup"] } } },
+				{ "name": "Delete Group", "request": { "method": "DELETE", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/deleteGroup/1", "host": ["{{base_url}}"], "path": ["v1", "deleteGroup", "1"] } } },
+				{ "name": "Delete Groups (Bulk)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"list\": [1, 2]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/deleteGroups", "host": ["{{base_url}}"], "path": ["v1", "deleteGroups"] } } },
+				{ "name": "Delete Group Hotline", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/deleteGroupHotline", "host": ["{{base_url}}"], "path": ["v1", "deleteGroupHotline"] } } },
+				{ "name": "Get User Modules", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/getUserModules/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "getUserModules", "{{group_id}}"] } } },
+				{ "name": "Duplicate Module", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/duplicateModule/1/2", "host": ["{{base_url}}"], "path": ["v1", "duplicateModule", "1", "2"] }, "description": "Copy modules từ groupId 1 sang groupId 2" } },
+				{ "name": "Add User Modules", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"modules\": []\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addUserModules", "host": ["{{base_url}}"], "path": ["v1", "addUserModules"] } } },
+				{ "name": "Update Campaign Process", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"status\": \"active\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateCampaignProcess", "host": ["{{base_url}}"], "path": ["v1", "updateCampaignProcess"] } } },
+				{ "name": "Get Departments", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/getDepartments", "host": ["{{base_url}}"], "path": ["v1", "getDepartments"] } } },
+				{ "name": "Delete Department", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/deleteDepartment", "host": ["{{base_url}}"], "path": ["v1", "deleteDepartment"] } } },
+				{ "name": "Get Extensions Department", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"departmentId\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/getExtensionsDepartment", "host": ["{{base_url}}"], "path": ["v1", "getExtensionsDepartment"] } } },
+				{ "name": "Add Department", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"name\": \"Phòng kỹ thuật\",\n    \"extensions\": [\"1001\", \"1002\"]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addDepartment", "host": ["{{base_url}}"], "path": ["v1", "addDepartment"] } } },
+				{ "name": "Update Department", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"name\": \"Phòng kỹ thuật Updated\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateDepartment", "host": ["{{base_url}}"], "path": ["v1", "updateDepartment"] } } },
+				{ "name": "Update Ext Department", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"departmentId\": 1,\n    \"extensions\": [\"1001\", \"1002\", \"1003\"]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateExtDepartment", "host": ["{{base_url}}"], "path": ["v1", "updateExtDepartment"] } } },
+				{ "name": "Update Department User", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"departmentId\": 1,\n    \"userId\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateDepartmentUser", "host": ["{{base_url}}"], "path": ["v1", "updateDepartmentUser"] } } },
+				{ "name": "Get List Reason", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/reason/getList/{{group_id}}", "host": ["{{base_url}}"], "path": ["v1", "reason", "getList", "{{group_id}}"] } } },
+				{ "name": "Get List Download", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/getListDownload", "host": ["{{base_url}}"], "path": ["v1", "getListDownload"] } } },
+				{ "name": "Get User Modules Sort", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/getUserModulesSort", "host": ["{{base_url}}"], "path": ["v1", "getUserModulesSort"] } } }
+			]
+		},
+		{
+			"name": "👤 5. Customers - Auth Required",
+			"description": "⚠️ CustomersController.php chưa tồn tại trong source code. Các route đã được khai báo trong api.php.",
+			"item": [
+				{ "name": "Get Customer By ID", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/customer/1", "host": ["{{base_url}}"], "path": ["v1", "customer", "1"] } } },
+				{ "name": "Get Latest Customer", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/customers/latest", "host": ["{{base_url}}"], "path": ["v1", "customers", "latest"] } } },
+				{ "name": "Get Customers (List)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"search\": \"\",\n    \"filters\": [],\n    \"sorts\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/customers", "host": ["{{base_url}}"], "path": ["v1", "customers"] } } },
+				{ "name": "Add Customer", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"firstName\": \"Khach\",\n    \"lastName\": \"Hang\",\n    \"phone\": \"0909123456\",\n    \"email\": \"customer@example.com\",\n    \"address\": \"HCM\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addCustomer", "host": ["{{base_url}}"], "path": ["v1", "addCustomer"] } } },
+				{ "name": "Add Customer And Note", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"firstName\": \"Khach\",\n    \"lastName\": \"Hang\",\n    \"phone\": \"0909123456\",\n    \"note\": \"Ghi chú\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addCustomerAndNote", "host": ["{{base_url}}"], "path": ["v1", "addCustomerAndNote"] } } },
+				{ "name": "Add Customer By Excel", "request": { "method": "POST", "header": [{ "key": "Accept", "value": "application/json" }], "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }] }, "url": { "raw": "{{base_url}}/v1/addCustomerByExcel", "host": ["{{base_url}}"], "path": ["v1", "addCustomerByExcel"] } } },
+				{ "name": "Duplicate Customer", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/duplicateCustomer/1", "host": ["{{base_url}}"], "path": ["v1", "duplicateCustomer", "1"] } } },
+				{ "name": "Import File", "request": { "method": "POST", "header": [{ "key": "Accept", "value": "application/json" }], "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }] }, "url": { "raw": "{{base_url}}/v1/importFile", "host": ["{{base_url}}"], "path": ["v1", "importFile"] } } },
+				{ "name": "Export Customer", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/exportCustomer", "host": ["{{base_url}}"], "path": ["v1", "exportCustomer"] } } },
+				{ "name": "Update Customer", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"firstName\": \"Updated\",\n    \"phone\": \"0909123456\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateCustomer", "host": ["{{base_url}}"], "path": ["v1", "updateCustomer"] } } },
+				{ "name": "Update Customer V2", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"firstName\": \"Updated V2\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateCustomerV2", "host": ["{{base_url}}"], "path": ["v1", "updateCustomerV2"] } } },
+				{ "name": "Remove Customer", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/removeCustomer/1", "host": ["{{base_url}}"], "path": ["v1", "removeCustomer", "1"] } } },
+				{ "name": "Remove Customers (Bulk)", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"list\": [1, 2, 3]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/removeCustomers", "host": ["{{base_url}}"], "path": ["v1", "removeCustomers"] } } },
+				{ "name": "Update Customer Tags", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"tags\": [\"VIP\", \"Priority\"]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateCustomerTags/1", "host": ["{{base_url}}"], "path": ["v1", "updateCustomerTags", "1"] } } },
+				{ "name": "Get Customer By Phone", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/getCustomerByPhone/0909123456", "host": ["{{base_url}}"], "path": ["v1", "getCustomerByPhone", "0909123456"] } } },
+				{ "name": "Customer Fields", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/customersField", "host": ["{{base_url}}"], "path": ["v1", "customersField"] } } },
+				{ "name": "Add Customer Field", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"name\": \"custom_field\",\n    \"type\": \"text\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/addCustomerField", "host": ["{{base_url}}"], "path": ["v1", "addCustomerField"] } } },
+				{ "name": "Update Customer Field", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1,\n    \"name\": \"updated_field\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateCustomerField", "host": ["{{base_url}}"], "path": ["v1", "updateCustomerField"] } } },
+				{ "name": "Delete Customer Field", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/deleteCustomerField", "host": ["{{base_url}}"], "path": ["v1", "deleteCustomerField"] } } },
+				{ "name": "Update Default View", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"fields\": []\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateDefaultView", "host": ["{{base_url}}"], "path": ["v1", "updateDefaultView"] } } }
+			]
+		},
+		{
+			"name": "📞 6. CDR - Public",
+			"description": "CDR APIs không cần auth",
+			"item": [
+				{ "name": "Get Calls", "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"list_agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"search\": \"\",\n    \"dispositions\": [],\n    \"recordsOnPage\": 10,\n    \"current_page\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getCalls", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getCalls"] }, "description": "Lấy danh sách cuộc gọi CDR với phân trang" } },
+				{ "name": "Get Static Calls", "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"list_agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getStaticCalls", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getStaticCalls"] }, "description": "Thống kê tổng cuộc gọi (total, answered, no answer, busy, failed)" } },
+				{ "name": "Get Static Calls v2", "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getStaticCallsv2", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getStaticCallsv2"] } } },
+				{ "name": "Export Excel v2", "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/exportExcelv2", "host": ["{{base_url}}"], "path": ["v1", "cdr", "exportExcelv2"] } } }
+			]
+		},
+		{
+			"name": "🔒 7. CDR - Auth Required",
+			"description": "CDR APIs cần JWT - Common body: devgroupId, extensions, startDate, endDate, search, recordsOnPage, connector_server",
+			"item": [
+				{ "name": "Get Calls Log", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"search\": \"\",\n    \"dispositions\": [],\n    \"recordsOnPage\": 10,\n    \"current_page\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getCallsLog", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getCallsLog"] } } },
+				{ "name": "Get Static Calls Log", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getStaticCallsLog", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getStaticCallsLog"] } } },
+				{ "name": "Report By Year", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"year\": 2025\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/reportByYear", "host": ["{{base_url}}"], "path": ["v1", "cdr", "reportByYear"] } } },
+				{ "name": "Get Call Detail", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"linkedid\": \"\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getCallDetail", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getCallDetail"] } } },
+				{ "name": "Get Static Call Detail", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"linkedid\": \"\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getStaticCallDetail", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getStaticCallDetail"] } } },
+				{ "name": "Get VoiceBox Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"voice_mail_context\": \"voicemail_context\",\n    \"connector_server\": \"voice_server_1\",\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getVoiceBoxCalls", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getVoiceBoxCalls"] } } },
+				{ "name": "Get Postman Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"contextin\": \"from-trunk\",\n    \"did\": [\"19001234\"],\n    \"connector_server\": \"voice_server_1\",\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"search\": \"\",\n    \"dispositions\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getPostmanCalls", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getPostmanCalls"] } } },
+				{ "name": "Report Summary Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/reportSummaryCalls", "host": ["{{base_url}}"], "path": ["v1", "cdr", "reportSummaryCalls"] } } },
+				{ "name": "Report Answered Outbound", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/reportAnsweredOutbound", "host": ["{{base_url}}"], "path": ["v1", "cdr", "reportAnsweredOutbound"] } } },
+				{ "name": "Report Answered Inbound", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/reportAnsweredInbound", "host": ["{{base_url}}"], "path": ["v1", "cdr", "reportAnsweredInbound"] } } },
+				{ "name": "Search Extensions", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"search\": \"1001\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/searchExtensions", "host": ["{{base_url}}"], "path": ["v1", "cdr", "searchExtensions"] } } },
+				{ "name": "Get CSAT Summary", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"calltype\": \"inbound\",\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"exportExcel\": false\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/getCSATSummary", "host": ["{{base_url}}"], "path": ["v1", "cdr", "getCSATSummary"] }, "description": "calltype: 'inbound' hoặc 'outbound'" } },
+				{ "name": "Report Billing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/reportBilling", "host": ["{{base_url}}"], "path": ["v1", "cdr", "reportBilling"] } } },
+				{ "name": "Export Excel v3", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/exportExcelv3", "host": ["{{base_url}}"], "path": ["v1", "cdr", "exportExcelv3"] } } },
+				{ "name": "Transfer Data To History", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-03-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/cdr/transferDataToHistory", "host": ["{{base_url}}"], "path": ["v1", "cdr", "transferDataToHistory"] } } }
+			]
+		},
+		{
+			"name": "📊 8. QueueLog - Auth Required",
+			"item": [
+				{ "name": "Report UnAnswered By Queues", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/queuelog/reportUnAnsweredByQueues", "host": ["{{base_url}}"], "path": ["v1", "queuelog", "reportUnAnsweredByQueues"] } } },
+				{ "name": "Export Excel v2", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/queuelog/exportExcelv2", "host": ["{{base_url}}"], "path": ["v1", "queuelog", "exportExcelv2"] } } },
+				{ "name": "Get QueueLog MissCall", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/queuelog/getQueueLogMissCall", "host": ["{{base_url}}"], "path": ["v1", "queuelog", "getQueueLogMissCall"] } } },
+				{ "name": "Get Inbound Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/queuelog/getInboundCalls", "host": ["{{base_url}}"], "path": ["v1", "queuelog", "getInboundCalls"] } } }
+			]
+		},
+		{
+			"name": "📊 9. QueueLog - Public",
+			"item": [
+				{ "name": "Update No Answer QueueLog", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/queuelog/updateNoAnswerQueueLog", "host": ["{{base_url}}"], "path": ["v1", "queuelog", "updateNoAnswerQueueLog"] } } }
+			]
+		},
+		{
+			"name": "🏷️ 10. UserType - Auth Required",
+			"item": [
+				{ "name": "Get UserType By ID", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/userType/1", "host": ["{{base_url}}"], "path": ["v1", "userType", "1"] } } },
+				{ "name": "Get UserTypes With Page", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": null,\n    \"search\": \"\",\n    \"sorts\": [],\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/userTypesWithPage", "host": ["{{base_url}}"], "path": ["v1", "userTypesWithPage"] } } },
+				{ "name": "Get All UserTypes", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/userTypes", "host": ["{{base_url}}"], "path": ["v1", "userTypes"] } } },
+				{ "name": "Insert UserType", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"name\": \"Agent Level 1\",\n    \"description\": \"Quyền cơ bản\",\n    \"group_id\": null,\n    \"privileges\": {\n        \"view\": [\"dashboard\", \"cdr\"],\n        \"edit\": [\"customer\"]\n    }\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/insertUserType", "host": ["{{base_url}}"], "path": ["v1", "insertUserType"] }, "description": "privileges format: { action: [page1, page2] }" } },
+				{ "name": "Update UserType", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"name\": \"Agent Level 1 Updated\",\n    \"description\": \"Quyền cập nhật\",\n    \"groupId\": null,\n    \"privileges\": {\n        \"view\": [\"dashboard\", \"cdr\", \"customer\"],\n        \"edit\": [\"customer\"]\n    }\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/updateUserType/1", "host": ["{{base_url}}"], "path": ["v1", "updateUserType", "1"] } } },
+				{ "name": "Delete UserType", "request": { "method": "DELETE", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/v1/deleteUserType/1", "host": ["{{base_url}}"], "path": ["v1", "deleteUserType", "1"] } } },
+				{ "name": "Delete UserTypes (Bulk)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"list\": [1, 2]\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/deleteUserTypes", "host": ["{{base_url}}"], "path": ["v1", "deleteUserTypes"] } } }
+			]
+		},
+		{
+			"name": "📞 11. IVR Inbound - Auth Required",
+			"description": "Tất cả API IVR Inbound cần JWT. Prefix: /v1/ivr_inbound",
+			"item": [
+				{ "name": "Get IVR Inbound DID", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundDID", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundDID"] } } },
+				{ "name": "Get IVR Inbound DID With Page", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"search\": \"\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundDIDWithPage", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundDIDWithPage"] } } },
+				{ "name": "Add/Edit DID For IVR Inbound", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": null,\n    \"groupId\": \"{{group_id}}\",\n    \"did\": \"19001234\",\n    \"description\": \"Main DID\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/addEditDIDForIVRInbound", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "addEditDIDForIVRInbound"] } } },
+				{ "name": "Get IVR Inbound Record", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundRecord", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundRecord"] } } },
+				{ "name": "Get IVR Inbound Record With Page", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundRecordWithPage", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundRecordWithPage"] } } },
+				{ "name": "Add/Edit Record For IVR Inbound", "request": { "method": "POST", "header": [{ "key": "Accept", "value": "application/json" }], "body": { "mode": "formdata", "formdata": [{ "key": "id", "value": "", "type": "text" }, { "key": "groupId", "value": "{{group_id}}", "type": "text" }, { "key": "name", "value": "Welcome", "type": "text" }, { "key": "file", "type": "file", "src": "" }] }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/addEditRecordForIVRInbound", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "addEditRecordForIVRInbound"] } } },
+				{ "name": "Get And Play Record", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": 1\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getAndPlayRecord", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getAndPlayRecord"] } } },
+				{ "name": "Get IVR Inbound Inbound Route", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundInboundRoute", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundInboundRoute"] } } },
+				{ "name": "Add/Edit Route For IVR Inbound", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"id\": null,\n    \"groupId\": \"{{group_id}}\",\n    \"did\": \"19001234\",\n    \"destination\": \"queue\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/addEditRouteForIVRInbound", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "addEditRouteForIVRInbound"] } } },
+				{ "name": "Get IVR Inbound Time Condition", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundTimeCondition", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundTimeCondition"] } } },
+				{ "name": "Get Time Condition", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getTimeCondition", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getTimeCondition"] } } },
+				{ "name": "Get Time Condition By DID", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"did\": \"19001234\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getTimeConditionByDID", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getTimeConditionByDID"] } } },
+				{ "name": "Get IVR Inbound Time Group", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundTimeGroup", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundTimeGroup"] } } },
+				{ "name": "Get Time Group", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getTimeGroup", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getTimeGroup"] } } },
+				{ "name": "Get IVR Inbound IVR", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVRInboundIVR", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVRInboundIVR"] } } },
+				{ "name": "Get IVR", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"groupId\": \"{{group_id}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/v1/ivr_inbound/getIVR", "host": ["{{base_url}}"], "path": ["v1", "ivr_inbound", "getIVR"] } } }
+			]
+		},
+		{
+			"name": "📥 12. Export",
+			"item": [
+				{ "name": "Download Export File", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{jwt_token}}", "description": "JWT token HOẶC X-Custom-Token" }, { "key": "X-Custom-Token", "value": "{{x_custom_token}}", "description": "MD5(group_secret)", "disabled": true }], "url": { "raw": "{{base_url}}/v1/export/filename.xlsx", "host": ["{{base_url}}"], "path": ["v1", "export", "filename.xlsx"] }, "description": "Download file đã export. Auth: JWT hoặc X-Custom-Token header" } },
+				{ "name": "Export Example Template", "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": { "raw": "{{base_url}}/v1/exportExample/extensions", "host": ["{{base_url}}"], "path": ["v1", "exportExample", "extensions"] }, "description": "Download template Excel mẫu. Types: extensions, b, c, default" } }
+			]
+		},
+		{
+			"name": "🔗 13. Connector (jwt.or.header)",
+			"description": "Connector APIs sử dụng middleware jwt.or.header.\nAuth: Bearer JWT Token HOẶC X-Custom-Token header (MD5 hash của group secret).",
+			"auth": {
+				"type": "apikey",
+				"apikey": [
+					{ "key": "key", "value": "X-Custom-Token", "type": "string" },
+					{ "key": "value", "value": "{{x_custom_token}}", "type": "string" },
+					{ "key": "in", "value": "header", "type": "string" }
+				]
+			},
+			"item": [
+				{ "name": "Group By Secret", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/connector/groupBySecret/{{group_secret}}", "host": ["{{base_url}}"], "path": ["connector", "groupBySecret", "{{group_secret}}"] } } },
+				{ "name": "Users By Extension", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"extensions\": \"1001,1002\",\n    \"secret\": \"{{group_secret}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/usersByExt", "host": ["{{base_url}}"], "path": ["connector", "usersByExt"] } } },
+				{ "name": "CDR - Get Static Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/cdr/getStaticCalls", "host": ["{{base_url}}"], "path": ["connector", "cdr", "getStaticCalls"] } } },
+				{ "name": "CDR - Get Calls", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"secret\": \"{{group_secret}}\",\n    \"devgroupId\": null,\n    \"extensions\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/cdr/getCalls", "host": ["{{base_url}}"], "path": ["connector", "cdr", "getCalls"] } } }
+			]
+		},
+		{
+			"name": "🔗 14. Connector - QueueLog (jwt.or.header)",
+			"description": "46 APIs QueueLog trong connector. Prefix: /connector/queuelog.\nCommon body: devgroupId, queues, agents, startDate, endDate, extensions.",
+			"auth": {
+				"type": "apikey",
+				"apikey": [
+					{ "key": "key", "value": "X-Custom-Token", "type": "string" },
+					{ "key": "value", "value": "{{x_custom_token}}", "type": "string" },
+					{ "key": "in", "value": "header", "type": "string" }
+				]
+			},
+			"item": [
+				{ "name": "Report By Summary", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportBySummary", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportBySummary"] } } },
+				{ "name": "Report By Queues", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportByQueues", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportByQueues"] } } },
+				{ "name": "Report Distribution Detailed", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportDistributionDetailed", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportDistributionDetailed"] } } },
+				{ "name": "Report Distribution Detailed By CallID", "request": { "method": "GET", "header": [{ "key": "Accept", "value": "application/json" }], "url": { "raw": "{{base_url}}/connector/queuelog/reportDistributionDetailedByCallid/call_id_here", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportDistributionDetailedByCallid", "call_id_here"] } } },
+				{ "name": "Get Queue Log", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"recordsOnPage\": 10\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/getQueueLog", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "getQueueLog"] } } },
+				{ "name": "Report Answered Service Level", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAnsweredServiceLevel", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAnsweredServiceLevel"] } } },
+				{ "name": "Report Answered By Queues", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAnsweredByQueues", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAnsweredByQueues"] } } },
+				{ "name": "Report Answered By Agents", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAnsweredByAgents", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAnsweredByAgents"] } } },
+				{ "name": "Report KPI", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportKPI", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportKPI"] } } },
+				{ "name": "Report Agent Availability", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAgentAvailability", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAgentAvailability"] } } },
+				{ "name": "Report Agent Session And Pause", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAgentSessionAndPause", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAgentSessionAndPause"] } } },
+				{ "name": "Report QueueLog MissCall", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportQueueLogMissCall", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportQueueLogMissCall"] } } },
+				{ "name": "Report QueueLog MissCall Today", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": []\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportQueueLogMissCallToday", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportQueueLogMissCallToday"] } } },
+				{ "name": "Export Excel (QueueLog)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/exportExcel", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "exportExcel"] } } },
+				{ "name": "Export Report", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\",\n    \"type\": \"summary\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/exportReport", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "exportReport"] } } },
+				{ "name": "Report Agent KPI", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAgentKPI", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAgentKPI"] } } },
+				{ "name": "Report Agent Summary", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportAgentSummary", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportAgentSummary"] } } },
+				{ "name": "Report Queue Agent Action", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n    \"devgroupId\": null,\n    \"queues\": [],\n    \"agents\": [],\n    \"startDate\": \"2025-01-01 00:00:00\",\n    \"endDate\": \"2025-12-31 23:59:59\"\n}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{base_url}}/connector/queuelog/reportQueueAgentAction", "host": ["{{base_url}}"], "path": ["connector", "queuelog", "reportQueueAgentAction"] } } }
+			]
+		}
+	]
+}
