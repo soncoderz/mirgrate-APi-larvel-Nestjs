@@ -58,6 +58,8 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 import { createHash, randomBytes } from "crypto";
+import { mkdir, writeFile } from "fs/promises";
+import { extname, join } from "path";
 import { Request } from "express";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
@@ -1314,17 +1316,16 @@ export class UsersService {
   async updateUser(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
+    avatar?: { originalname?: string; buffer?: Buffer },
   ) {
     const userId = Number(body.id);
-    if (!Number.isFinite(userId) || userId <= 0) {
-      this.throwError(
-        { id: "Id của người dùng không hợp lệ." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
+    const params = this.filteredUpdateUserParams(body);
+    const validationError = await this.validateUpdateUserParams(params, userId);
+    if (validationError) {
+      return validationError;
     }
 
-    const user = await this.findUserById(userId, false, true);
+    const user = await this.findRawUserById(userId, true);
     if (!user) {
       this.throwError(
         { user_id_not_exist: "Id của người dùng không tồn tại." },
@@ -1333,64 +1334,42 @@ export class UsersService {
       );
     }
 
-    await this.validateUpdateUser(body, user);
-
     if (
       user.status !== "active" &&
       Number(body.groupId) !== 1 &&
       body.status === "active"
     ) {
-      await this.assertGroupHasCapacity(Number(body.groupId ?? user.groupId));
+      await this.assertGroupHasCapacityForUpdate(
+        Number(body.groupId ?? user.groupId),
+      );
     }
 
     const currentUser = await this.getCurrentUser(payload);
-    const updateColumns: string[] = [];
-    const updateParams: any[] = [];
+    const updates = await this.buildLaravelUpdateUserColumns(
+      params,
+      body,
+      userId,
+      avatar,
+      currentUser?.id,
+    );
+    const updateColumns = Array.from(updates.keys()).map((key) => `\`${key}\` = ?`);
+    const updateParams = Array.from(updates.values());
 
-    for (const [key, value] of Object.entries(body)) {
-      if (key === "id" || !USER_MUTABLE_COLUMNS.has(key)) {
-        continue;
-      }
+    await this.database
+      .pool("main")
+      .execute<ResultSetHeader>(
+        `UPDATE users SET ${updateColumns.join(", ")} WHERE id = ?`,
+        [...updateParams, userId],
+      );
 
-      if (
-        value === null &&
-        ![
-          "extension",
-          "extensions_view",
-          "queues",
-          "otherId",
-          "otherEmail",
-          "is_google2fa",
-        ].includes(key)
-      ) {
-        continue;
-      }
-
-      updateColumns.push(`\`${key}\` = ?`);
-      updateParams.push(this.emptyStringToNullFor(key, value));
-    }
-
-    if (body.password) {
-      updateColumns.push("`password` = ?");
-      updateParams.push(await bcrypt.hash(String(body.password), 12));
-    }
-
-    updateColumns.push("`updated_at` = ?", "`updated_by` = ?");
-    updateParams.push(this.nowSql(), currentUser?.id ?? null, userId);
-
-    if (updateColumns.length > 0) {
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          `UPDATE users SET ${updateColumns.join(", ")} WHERE id = ?`,
-          updateParams,
-        );
-    }
-
+    await this.syncJntUserAccessScopes(userId, body);
     await this.upsertUserConfig(userId, body, currentUser?.id);
 
+    const updatedUserRaw = await this.findRawUserById(userId, true);
+    await this.insertUpdateUserHistory(params, user, updatedUserRaw, currentUser);
+    await this.updateDepartmentExtension(body);
+
     const updatedUser = await this.findUserById(userId, false, true);
-    await this.insertUserHistory("update", user, updatedUser, currentUser);
 
     return {
       success: true,
@@ -1887,6 +1866,24 @@ export class UsersService {
     return user;
   }
 
+  private async findRawUserById(id: number, includeTrashed = false) {
+    if (!Number.isFinite(id) || id <= 0) {
+      return undefined;
+    }
+
+    const rows = await this.database.query<DbRow[]>(
+      "main",
+      `
+        SELECT *
+        FROM users
+        WHERE id = ? ${includeTrashed ? "" : "AND status <> 'trash'"}
+        LIMIT 1
+      `,
+      [id],
+    );
+    return rows[0];
+  }
+
   private async getCurrentUser(payload: AuthPayload | undefined) {
     const userId = Number(payload?.sub ?? payload?.id);
     return this.findUserById(userId, false, true);
@@ -1917,6 +1914,15 @@ export class UsersService {
       [],
     );
     return rows.map((row) => String(row.Field));
+  }
+
+  private async tableExists(table: string) {
+    const rows = await this.database.query<DbRow[]>(
+      "main",
+      "SHOW TABLES LIKE ?",
+      [table],
+    );
+    return rows.length > 0;
   }
 
   private async getGroupForLogin(id: number) {
@@ -2233,6 +2239,229 @@ export class UsersService {
       );
   }
 
+  private filteredUpdateUserParams(body: Record<string, any>) {
+    const keepNullKeys = new Set([
+      "avatar",
+      "id",
+      "extensions_view",
+      "queues",
+      "extension",
+    ]);
+    const params: Record<string, any> = {};
+
+    for (const [key, value] of Object.entries(body)) {
+      if (!keepNullKeys.has(key) && this.isLaravelNullLoose(value)) {
+        continue;
+      }
+      params[key] = value;
+    }
+
+    return params;
+  }
+
+  private async validateUpdateUserParams(
+    params: Record<string, any>,
+    userId: number,
+  ) {
+    const errors: Record<string, string> = {};
+
+    if (
+      params.firstName !== undefined &&
+      !this.isBetween(params.firstName, 1, 50)
+    ) {
+      errors.firstName = "Xin nhập từ 1 đến 50 ký tự.";
+    }
+    if (
+      params.lastName !== undefined &&
+      !this.isBetween(params.lastName, 1, 50)
+    ) {
+      errors.lastName = "Xin nhập từ 1 đến 50 ký tự.";
+    }
+    if (params.email !== undefined) {
+      const email = String(params.email);
+      if (!this.isBetween(email, 6, 255) || !this.isEmail(email)) {
+        errors.email = "Xin nhập đúng định dạng email.";
+      } else if (await this.emailExistsForOtherUser(email, userId)) {
+        errors.email = "Đã tồn tại";
+      }
+    }
+    if (
+      params.password !== undefined &&
+      !this.isBetween(params.password, 6, 50)
+    ) {
+      errors.password = "Xin nhập từ 6 đến 50 ký tự.";
+    }
+    if (params.address !== undefined && String(params.address).length > 255) {
+      errors.address = "Xin nhập không quá 255 ký tự.";
+    }
+    if (params.note !== undefined && String(params.note).length > 255) {
+      errors.note = "Xin nhập không quá 255 ký tự.";
+    }
+    if (params.groupId !== undefined) {
+      if (!this.isNumeric(params.groupId)) {
+        errors.groupId = "Xin nhập chữ số.";
+      } else {
+        const group = await this.getGroupById(Number(params.groupId));
+        if (!group || group.status === "trash") {
+          errors.groupId = "Không tồn tại.";
+        }
+      }
+    }
+    if (
+      params.status !== undefined &&
+      !["active", "lock", "pending", "trash"].includes(String(params.status))
+    ) {
+      errors.status = "Không nằm trong những thông tin cho phép.";
+    }
+    if (
+      params.role !== undefined &&
+      !["agent", "admin", "superadmin", "supervisor", "manager"].includes(
+        String(params.role),
+      )
+    ) {
+      errors.role = "Không nằm trong những thông tin cho phép.";
+    }
+    if (params.extension !== undefined && String(params.extension).length > 50) {
+      errors.extension = "Xin nhập không quá 50 ký tự.";
+    }
+    if (params.queues !== undefined && String(params.queues).length > 255) {
+      errors.queues = "Xin nhập không quá 255 ký tự.";
+    }
+
+    if (Object.keys(errors).length === 0) {
+      return undefined;
+    }
+
+    return {
+      code: 406,
+      message: "Invalid parameters",
+      error: { errors },
+    };
+  }
+
+  private async emailExistsForOtherUser(email: string, userId: number) {
+    const rows = await this.database.query<DbRow[]>(
+      "main",
+      `
+        SELECT id
+        FROM users
+        WHERE email = ? AND status <> 'trash' AND id <> ?
+        LIMIT 1
+      `,
+      [email, Number.isFinite(userId) ? userId : 0],
+    );
+    return Boolean(rows[0]);
+  }
+
+  private async buildLaravelUpdateUserColumns(
+    params: Record<string, any>,
+    body: Record<string, any>,
+    userId: number,
+    avatar: { originalname?: string; buffer?: Buffer } | undefined,
+    currentUserId?: number,
+  ) {
+    const excludedGeneralKeys = new Set([
+      "confirmPassword",
+      "avatar",
+      "phone",
+      "address",
+      "mobile",
+      "note",
+      "emailqr",
+      "is_hotdesk",
+      "transports",
+      "port",
+      "list_region",
+      "list_department",
+      "list_branch",
+    ]);
+    const updates = new Map<string, any>();
+
+    for (const [key, value] of Object.entries(params)) {
+      if (key === "id") {
+        continue;
+      }
+      if (key === "password") {
+        updates.set("password", await bcrypt.hash(String(body.password), 12));
+        continue;
+      }
+      if (!excludedGeneralKeys.has(key) && USER_TABLE_COLUMNS.has(key)) {
+        updates.set(key, value);
+      }
+    }
+
+    updates.set(
+      "firstName",
+      !this.isPhpEmpty(body.firstName) ? body.firstName : null,
+    );
+    updates.set("phone", !this.isPhpEmpty(body.phone) ? body.phone : "");
+    updates.set("mobile", !this.isPhpEmpty(body.mobile) ? body.mobile : "");
+    updates.set("address", !this.isPhpEmpty(body.address) ? body.address : "");
+    updates.set("note", !this.isPhpEmpty(body.note) ? body.note : "");
+    updates.set("otherId", !this.isPhpEmpty(body.otherId) ? body.otherId : null);
+    updates.set(
+      "otherEmail",
+      !this.isPhpEmpty(body.otherEmail) ? body.otherEmail : null,
+    );
+    updates.set(
+      "is_google2fa",
+      !this.isPhpEmpty(body.is_google2fa) ? body.is_google2fa : null,
+    );
+
+    if (Object.prototype.hasOwnProperty.call(body, "queues")) {
+      updates.set("queues", this.isPhpEmpty(body.queues) ? null : body.queues);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "extension")) {
+      updates.set(
+        "extension",
+        this.isPhpEmpty(body.extension) ? null : body.extension,
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "extensions_view")) {
+      updates.set(
+        "extensions_view",
+        this.isPhpEmpty(body.extensions_view) ? null : body.extensions_view,
+      );
+    }
+
+    if (avatar) {
+      updates.set("avatar", await this.storeUserAvatar(userId, avatar));
+    }
+
+    updates.set("updated_at", this.nowSql());
+    updates.set("updated_by", currentUserId ?? null);
+
+    return updates;
+  }
+
+  private async storeUserAvatar(
+    userId: number,
+    avatar: { originalname?: string; buffer?: Buffer },
+  ) {
+    const ext = extname(avatar.originalname ?? "").replace(".", "");
+    if (!["jpg", "jpeg", "png", "bmp", "gif", "svg", "JPG", "PNG"].includes(ext)) {
+      this.throwError(
+        { avatar: "Chỉ cho phép hình ảnh jpeg, png, bmp, gif, hoặc svg." },
+        HttpStatus.NOT_ACCEPTABLE,
+        "Invalid parameters",
+      );
+    }
+
+    if (!avatar.buffer) {
+      this.throwError(
+        { avatar: "Không thể upload hình ảnh." },
+        HttpStatus.NOT_ACCEPTABLE,
+        "Invalid parameters",
+      );
+    }
+
+    const name = `${userId}-${this.unixNow()}.${ext}`;
+    const dir = join(process.cwd(), "img", "user_avatar");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, name), avatar.buffer);
+    return name;
+  }
+
   private async validateUpdateUser(body: Record<string, any>, current: DbRow) {
     if (
       body.firstName !== undefined &&
@@ -2350,6 +2579,23 @@ export class UsersService {
     }
   }
 
+  private async assertGroupHasCapacityForUpdate(groupId: number) {
+    const group = await this.getGroupById(groupId);
+    const rows = await this.database.query<DbRow[]>(
+      "main",
+      "SELECT COUNT(*) AS total FROM users WHERE groupId = ? AND status = 'active'",
+      [groupId],
+    );
+
+    if (Number(rows[0]?.total ?? 0) >= Number(group?.limitUser ?? 0)) {
+      this.throwError(
+        { group_full: "Group đã vượt quá số lương thành viên cho phép." },
+        HttpStatus.NOT_ACCEPTABLE,
+        "Group_Full",
+      );
+    }
+  }
+
   private async upsertUserConfig(
     userId: number,
     body: Record<string, any>,
@@ -2365,13 +2611,12 @@ export class UsersService {
       await this.database.pool("main").execute<ResultSetHeader>(
         `
           UPDATE user_config
-          SET is_hotdesk = ?, updated_by = ?, updated_at = ?, transports = ?, port = ?
+          SET is_hotdesk = ?, updated_by = ?, transports = ?, port = ?
           WHERE userid = ?
         `,
         [
           Number(body.is_hotdesk) === 1 ? 1 : 0,
           currentUserId ?? null,
-          this.nowSql(),
           body.transports ?? null,
           body.port ?? null,
           userId,
@@ -2403,6 +2648,139 @@ export class UsersService {
         null,
         this.nowSql(),
         currentUserId ?? null,
+      ],
+    );
+  }
+
+  private async syncJntUserAccessScopes(
+    userId: number,
+    body: Record<string, any>,
+  ) {
+    if (!(await this.tableExists("jnt_user_access_scopes"))) {
+      return;
+    }
+
+    const scopes: Record<string, unknown> = {
+      region: body.list_region ? body.list_region : [],
+      branch: body.list_branch ? body.list_branch : [],
+      department: body.list_department ? body.list_department : [],
+    };
+
+    for (const [type, rawIds] of Object.entries(scopes)) {
+      await this.database
+        .pool("main")
+        .execute<ResultSetHeader>(
+          "DELETE FROM jnt_user_access_scopes WHERE user_id = ? AND scope_type = ?",
+          [userId, type],
+        );
+
+      for (const scopeId of this.normalizeScopeIds(rawIds)) {
+        await this.database
+          .pool("main")
+          .execute<ResultSetHeader>(
+            "INSERT INTO jnt_user_access_scopes (user_id, scope_type, scope_id) VALUES (?, ?, ?)",
+            [userId, type, scopeId],
+          );
+      }
+    }
+  }
+
+  private normalizeScopeIds(value: unknown) {
+    const ids = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return ids.filter((id) => !this.isPhpEmpty(id));
+  }
+
+  private async updateDepartmentExtension(body: Record<string, any>) {
+    if (this.isPhpEmpty(body.departmentId) || this.isPhpEmpty(body.extension)) {
+      return;
+    }
+
+    const extension = String(body.extension);
+    const newExt = JSON.stringify(extension);
+    await this.database.pool("main").execute<ResultSetHeader>(
+      `
+        UPDATE departments
+        SET extensions = REPLACE(REPLACE(REPLACE(REPLACE(extensions, ?, ''), ',,', ','), '[,', '['), ',]', ']')
+        WHERE extensions LIKE ?
+      `,
+      [newExt, `%${newExt}%`],
+    );
+
+    const departments = await this.database.query<DbRow[]>(
+      "main",
+      "SELECT id, extensions FROM departments WHERE id = ? LIMIT 1",
+      [body.departmentId],
+    );
+    const department = departments[0];
+    if (!department) {
+      return;
+    }
+
+    let extensions: string[] = [];
+    if (!this.isPhpEmpty(department.extensions)) {
+      try {
+        const parsed = JSON.parse(String(department.extensions));
+        extensions = Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        extensions = [];
+      }
+    }
+
+    if (!extensions.includes(extension)) {
+      extensions.push(extension);
+    }
+
+    await this.database
+      .pool("main")
+      .execute<ResultSetHeader>(
+        "UPDATE departments SET extensions = ? WHERE id = ?",
+        [JSON.stringify(extensions), department.id],
+      );
+  }
+
+  private async insertUpdateUserHistory(
+    params: Record<string, any>,
+    oldUser: DbRow | undefined,
+    newUser: DbRow | undefined,
+    currentUser: DbRow | undefined,
+  ) {
+    if (!oldUser || !newUser || !currentUser) {
+      return;
+    }
+
+    const dataChange = {
+      old: [] as Record<string, any>[],
+      new: [] as Record<string, any>[],
+    };
+    const text: string[] = [];
+
+    for (const [key, value] of Object.entries(params)) {
+      if (key === "avatar") {
+        continue;
+      }
+      if (value !== oldUser[key]) {
+        dataChange.old.push({ [key]: oldUser[key] });
+        dataChange.new.push({ [key]: value });
+        text.push(key);
+      }
+    }
+
+    const fullname =
+      `${currentUser.lastName ?? ""} ${currentUser.firstName ?? ""}`.trim();
+    const historyText = `<b>${fullname}</b> đã cập nhật <i>${text.join(",")}</i> cho tài khoản: <b>${newUser.email}</b>`;
+
+    await this.database.pool("main").execute<ResultSetHeader>(
+      `
+        INSERT INTO data_history (action,action_type,data_change,created_by,groupId,text)
+        VALUES (?,?,?,?,?,?)
+      `,
+      [
+        "update",
+        "user",
+        JSON.stringify(dataChange),
+        currentUser.id,
+        newUser.groupId,
+        historyText,
       ],
     );
   }
@@ -2804,6 +3182,14 @@ export class UsersService {
       return true;
     }
     return Array.isArray(value) && value.length === 0;
+  }
+
+  private isLaravelNullLoose(value: unknown) {
+    return value === undefined || value === null || value === "";
+  }
+
+  private isNumeric(value: unknown) {
+    return value !== "" && Number.isFinite(Number(value));
   }
 
   private normalizeBcryptHash(hash: string) {

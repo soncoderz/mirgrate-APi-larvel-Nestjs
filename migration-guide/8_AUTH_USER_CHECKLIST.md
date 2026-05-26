@@ -24,6 +24,13 @@ Snapshot ngay 2026-05-26:
   gom `links[].page`.
 - MySQL pool da bat `dateStrings: true` de response datetime giong Laravel
   `YYYY-MM-DD HH:mm:ss`, khong tra ISO string.
+- `POST /api/v1/updateUser` da cap nhat theo flow Laravel: filter params truoc validate,
+  validate rule Laravel, update field explicit (`firstName`, `phone`, `mobile`, `address`,
+  `note`, `otherId`, `otherEmail`, `is_google2fa`, `queues`, `extension`,
+  `extensions_view`), upload `avatar`, upsert `user_config`, ghi `data_history`
+  voi field list, va sync `departments.extensions`.
+- `updateUser` co sync `jnt_user_access_scopes` neu table ton tai; SQL dump hien tai
+  chua co DDL table nay nen service guard de tranh crash tren DB imported hien tai.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
@@ -60,7 +67,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByRole` | `UsersController@getUsersByRole` | Role filter |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByExt` | `UsersController@getUserInfoByExtension` | Also used by connector |
 | CODED_PENDING_POSTMAN | `GET /api/v1/user/:id` | `UsersController@getUserByID` | Hide password fields |
-| CODED_PENDING_POSTMAN | `POST /api/v1/updateUser` | `UsersController@updateUser` | Validate, update, side effects |
+| CODED_PENDING_POSTMAN | `POST /api/v1/updateUser` | `UsersController@updateUser` | Laravel param filter/validate/update/user_config/history/department side effects |
 | CODED_PENDING_POSTMAN | `POST /api/v1/updateUserInfoByField` | `UsersController@updateUserInfoByField` | `is_webRTC`/`is_receive_chat`; current SQL dump lacks these columns |
 | CODED_PENDING_POSTMAN | `POST /api/v1/addUserAsMemberOfCompany` | `UsersController@addUserAsMemberOfCompany` | Create user in group |
 | CODED_PENDING_POSTMAN | `POST /api/v1/getUserNameByAgentsView` | `UsersController@getUserNameByAgentsView` | Key by `agentId` |

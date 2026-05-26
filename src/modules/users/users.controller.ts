@@ -42,8 +42,11 @@ import {
   Get,
   Param,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { Request } from "express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { MigrationStubService } from "../../common/services/migration-stub.service";
@@ -116,11 +119,13 @@ export class UsersController {
 
   @Post("updateUser")
   @HttpCode(200)
+  @UseInterceptors(FileInterceptor("avatar"))
   updateUser(
     @Body() body: Record<string, unknown>,
+    @UploadedFile() avatar: any,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.updateUser(body, request.user);
+    return this.users.updateUser(body, request.user, avatar);
   }
 
   @Post("updateUserInfoByField")

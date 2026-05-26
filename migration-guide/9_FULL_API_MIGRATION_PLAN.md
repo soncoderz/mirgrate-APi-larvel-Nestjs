@@ -29,6 +29,9 @@ Snapshot ngay 2026-05-26:
   filter/sort Laravel format, `recordsOnPage` 406 validation, paginator URL/links
   gom `links[].page`, va datetime string format theo Laravel.
 - Database pool dang dung `dateStrings: true` de tranh JSON ISO date khac Laravel.
+- `POST /api/v1/updateUser` da cap nhat theo Laravel flow: param filter/validate,
+  explicit field normalization, avatar upload, `user_config`, `data_history`,
+  `departments.extensions`, va guarded `jnt_user_access_scopes` sync.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
@@ -170,7 +173,7 @@ Status values:
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/usersByRole` | `UsersController@getUsersByRole` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/usersByExt` | `UsersController@getUserInfoByExtension` |
 | CODED_PENDING_POSTMAN | M1 | GET | `/api/v1/user/{id}` | `UsersController@getUserByID` |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/updateUser` | `UsersController@updateUser` |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/updateUser` | `UsersController@updateUser`; Laravel flow/side effects ported |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/updateUserInfoByField` | `UsersController@updateUserInfoByField` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsMemberOfCompany` | `UsersController@addUserAsMemberOfCompany` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/getUserNameByAgentsView` | `UsersController@getUserNameByAgentsView` |
