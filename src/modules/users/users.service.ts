@@ -378,9 +378,14 @@ export class UsersService {
       return { message: "Token is missing", code: 401 };
     }
 
+    if (this.blacklist.isInvalidated(token)) {
+      return { message: "Token is invalid", code: 401 };
+    }
+
     try {
       const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
         secret: this.jwtSecret(),
+        algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
       });
       const user = await this.getCurrentUser(payload);
       return user

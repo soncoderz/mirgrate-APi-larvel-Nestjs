@@ -24,6 +24,7 @@ Snapshot ngay 2026-05-26:
 - Swagger da duoc cau hinh tai `SWAGGER_PATH` mac dinh `api/docs` de test API.
 - Logout da co JWT blacklist in-memory de reject token sau khi logout; neu can parity qua restart,
   can nang cap blacklist sang Redis/DB.
+- `POST /api/v1/checkToken` cung check JWT blacklist de token da logout tra `code: 401`.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
@@ -143,7 +144,7 @@ Status values:
 | Status | Phase | Method | Path | Laravel source |
 | --- | --- | --- | --- | --- |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/forgotPassword` | `UsersController@forgotPassword` |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkToken` | `UsersController@me` |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkToken` | `UsersController@me`; checks JWT blacklist |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkRecaptcha` | `UsersController@checkRecaptcha` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/changePasswordForgot` | `UsersController@changePasswordForgot` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/getUserToken` | `UsersController@getUserToken` |
