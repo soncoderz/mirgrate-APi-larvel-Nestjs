@@ -32,9 +32,12 @@ Snapshot ngay 2026-05-26:
 - `POST /api/v1/updateUser` da cap nhat theo Laravel flow: param filter/validate,
   explicit field normalization, avatar upload, `user_config`, `data_history`,
   `departments.extensions`, va guarded `jnt_user_access_scopes` sync.
+- `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), verify lai token sau khi sign, check group lock/existence, va getQueueAndAgents cho superadmin.
+- `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan logic validate (address, note, status), default userCode unix timestamp (`unixNow()`), sync `JnTUserAccessScopes` cho scope types, insert `qrcode_mifone`, upload avatar va UPDATE user avatar field, sync `departments.extensions`, va giu `user_config` dang comment giong Laravel.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
+
 
 ## 1. Completion milestones
 

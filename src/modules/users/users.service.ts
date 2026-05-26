@@ -1380,6 +1380,7 @@ export class UsersService {
   async addUserAsMemberOfCompany(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
+    avatar?: { originalname?: string; buffer?: Buffer },
   ) {
     this.validateCreateMember(body);
     await this.assertEmailIsAvailable(String(body.email));
@@ -1397,10 +1398,11 @@ export class UsersService {
 
     const currentUser = await this.getCurrentUser(payload);
     const now = this.nowSql();
+    // Đổi default userCode từ Date.now() → this.unixNow() (giống Laravel dùng time())
     const userCode =
       body.type_user === "midesk"
         ? await this.nextMideskUserCode()
-        : String(body.userCode ?? Date.now());
+        : String(body.userCode ?? this.unixNow());
 
     const [result] = await this.database.pool("main").execute<ResultSetHeader>(
       `
@@ -1439,11 +1441,36 @@ export class UsersService {
     );
 
     const insertedId = result.insertId;
-    await this.insertUserConfigForCreatedUser(
-      insertedId,
-      body,
-      currentUser?.id,
-    );
+
+    // 1. Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
+    await this.syncJntUserAccessScopes(insertedId, body);
+
+    // 2. Insert QRCodeMifone nếu có emailqr
+    if (!this.isPhpEmpty(body.emailqr)) {
+      if (await this.tableExists("qrcode_mifone")) {
+        await this.database.pool("main").execute<ResultSetHeader>(
+          "INSERT INTO qrcode_mifone (userId, groupId, email) VALUES (?, ?, ?)",
+          [insertedId, body.groupId ?? null, String(body.emailqr)],
+        );
+      }
+    }
+
+    // 3. Upload avatar nếu có file
+    if (avatar?.buffer) {
+      const avatarName = await this.storeUserAvatar(insertedId, avatar);
+      await this.database
+        .pool("main")
+        .execute<ResultSetHeader>(
+          "UPDATE users SET avatar = ? WHERE id = ?",
+          [avatarName, insertedId],
+        );
+    }
+
+    // 4. user_config: Laravel đang comment phần này nên giữ ở dạng comment
+    // if (body.is_hotdesk == 1 || body.transports != null || body.port != null) {
+    //   await this.insertUserConfigForCreatedUser(insertedId, body, currentUser?.id);
+    // }
+
     const insertedUser = await this.findUserById(insertedId, false, true);
     await this.insertUserHistory(
       "insert",
@@ -1451,6 +1478,9 @@ export class UsersService {
       insertedUser,
       currentUser,
     );
+
+    // 5. Update departments.extensions nếu có departmentId và extension
+    await this.updateDepartmentExtension(body);
 
     return {
       success: {
@@ -2530,6 +2560,25 @@ export class UsersService {
       )
     ) {
       errors.role = "Role không hợp lệ.";
+    }
+    // address max:255
+    if (body.address !== undefined && body.address !== null && body.address !== "") {
+      if (String(body.address).length > 255) {
+        errors.address = "Địa chỉ không được vượt quá 255 ký tự.";
+      }
+    }
+    // note max:255
+    if (body.note !== undefined && body.note !== null && body.note !== "") {
+      if (String(body.note).length > 255) {
+        errors.note = "Ghi chú không được vượt quá 255 ký tự.";
+      }
+    }
+    // status in:active,lock,pending,trash
+    if (
+      body.status &&
+      !["active", "lock", "pending", "trash"].includes(String(body.status))
+    ) {
+      errors.status = "Trạng thái không hợp lệ.";
     }
 
     if (Object.keys(errors).length) {

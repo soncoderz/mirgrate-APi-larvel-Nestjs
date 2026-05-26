@@ -136,11 +136,13 @@ export class UsersController {
 
   @Post("addUserAsMemberOfCompany")
   @HttpCode(200)
+  @UseInterceptors(FileInterceptor("avatar"))
   addUserAsMemberOfCompany(
     @Body() body: Record<string, unknown>,
+    @UploadedFile() avatar: any,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.addUserAsMemberOfCompany(body, request.user);
+    return this.users.addUserAsMemberOfCompany(body, request.user, avatar);
   }
 
   @Post("getUserNameByAgentsView")

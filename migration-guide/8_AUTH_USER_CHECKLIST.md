@@ -31,6 +31,8 @@ Snapshot ngay 2026-05-26:
   voi field list, va sync `departments.extensions`.
 - `updateUser` co sync `jnt_user_access_scopes` neu table ton tai; SQL dump hien tai
   chua co DDL table nay nen service guard de tranh crash tren DB imported hien tai.
+- `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), lay custom claims va verify lai JWT token truoc khi tra ve, kiem tra group locked, va superadmin getQueueAndAgents.
+- `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan validate (address, note, status), thay doi default userCode sang `unixNow()`, dong bo sync `JnTUserAccessScopes` cho regions/branches/departments, insert `qrcode_mifone` neu co `emailqr`, ho tro upload avatar vao file system va update columns, sync `departments.extensions`, dong thoi comment `user_config` giong nhu Laravel code.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
