@@ -63,6 +63,7 @@ export function createMysqlPool(config: ConfigService, env: MysqlEnvMap): Pool {
     waitForConnections: true,   // Chờ khi pool đầy (thay vì throw error)
     connectionLimit: 10,        // Tối đa 10 connection đồng thời
     timezone: "Z",              // Sử dụng UTC timezone
+    dateStrings: true,          // Match Laravel JSON: YYYY-MM-DD HH:mm:ss thay vi ISO Date
     namedPlaceholders: true,    // Cho phép dùng :name thay vì ? trong query
   });
 }

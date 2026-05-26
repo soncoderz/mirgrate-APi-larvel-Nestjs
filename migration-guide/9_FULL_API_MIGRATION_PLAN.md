@@ -26,7 +26,9 @@ Snapshot ngay 2026-05-26:
   can nang cap blacklist sang Redis/DB.
 - `POST /api/v1/checkToken` cung check JWT blacklist de token da logout tra `code: 401`.
 - `POST /api/v1/users` da cap nhat parity voi Laravel `getUsers`: full select/join fields,
-  filter/sort Laravel format, `recordsOnPage` 406 validation, va paginator URL/links.
+  filter/sort Laravel format, `recordsOnPage` 406 validation, paginator URL/links
+  gom `links[].page`, va datetime string format theo Laravel.
+- Database pool dang dung `dateStrings: true` de tranh JSON ISO date khac Laravel.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.

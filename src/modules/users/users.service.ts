@@ -2689,13 +2689,16 @@ export class UsersService {
     currentPage: number,
     lastPage: number,
   ) {
-    const links: Array<{ url: string | null; label: string; active: boolean }> = [
+    const links: Array<{
+      url: string | null;
+      label: string;
+      page: number | null;
+      active: boolean;
+    }> = [
       {
-        url:
-          currentPage > 1
-            ? this.paginationUrl(path, currentPage - 1)
-            : null,
+        url: currentPage > 1 ? this.paginationUrl(path, currentPage - 1) : null,
         label: "&laquo; Previous",
+        page: currentPage > 1 ? currentPage - 1 : null,
         active: false,
       },
     ];
@@ -2704,16 +2707,15 @@ export class UsersService {
       links.push({
         url: this.paginationUrl(path, page),
         label: String(page),
+        page,
         active: page === currentPage,
       });
     }
 
     links.push({
-      url:
-        currentPage < lastPage
-          ? this.paginationUrl(path, currentPage + 1)
-          : null,
+      url: currentPage < lastPage ? this.paginationUrl(path, currentPage + 1) : null,
       label: "Next &raquo;",
+      page: currentPage < lastPage ? currentPage + 1 : null,
       active: false,
     });
 

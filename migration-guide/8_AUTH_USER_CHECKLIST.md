@@ -20,7 +20,10 @@ Snapshot ngay 2026-05-26:
 - `POST /api/v1/users` da cap nhat query theo Laravel `getUsers`: select `users.*`
   kem `departmentName`, `typeName`, `groupName`, `emailqr`, `created_name`,
   `updated_name`, `is_hotdesk`, `transports`, `port`, `is_google2fa`; ho tro
-  filter/sort Laravel format, validate `recordsOnPage`, va paginator URL/links.
+  filter/sort Laravel format, validate `recordsOnPage`, va paginator URL/links
+  gom `links[].page`.
+- MySQL pool da bat `dateStrings: true` de response datetime giong Laravel
+  `YYYY-MM-DD HH:mm:ss`, khong tra ISO string.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
