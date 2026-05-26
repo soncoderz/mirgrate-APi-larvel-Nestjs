@@ -28,6 +28,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
+import { JwtBlacklistService } from "../services/jwt-blacklist.service";
 
 /**
  * ConnectorGuard - Guard xác thực đa cơ chế cho API connector
@@ -40,6 +41,7 @@ export class ConnectorGuard implements CanActivate {
   constructor(
     private readonly config: ConfigService,  // Đọc biến môi trường
     private readonly jwt: JwtService,         // Verify JWT token
+    private readonly blacklist: JwtBlacklistService,
   ) {}
 
   /**
@@ -107,6 +109,10 @@ export class ConnectorGuard implements CanActivate {
     // Tách Bearer Token từ header
     const [type, token] = authorization?.split(" ") ?? [];
     if (type?.toLowerCase() !== "bearer" || !token) {
+      return undefined;
+    }
+
+    if (this.blacklist.isInvalidated(token)) {
       return undefined;
     }
 

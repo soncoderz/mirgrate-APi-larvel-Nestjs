@@ -30,6 +30,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { JwtBlacklistService } from '../services/jwt-blacklist.service';
 
 /**
  * JwtAuthGuard - Guard xác thực JWT bắt buộc
@@ -42,6 +43,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly config: ConfigService,  // Đọc biến môi trường
     private readonly jwt: JwtService,         // Verify/decode JWT token
+    private readonly blacklist: JwtBlacklistService,
   ) {}
 
   /**
@@ -68,6 +70,13 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException({
         success: false,
         message: 'Unauthorized',
+      });
+    }
+
+    if (this.blacklist.isInvalidated(token)) {
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Invalid or expired token',
       });
     }
 

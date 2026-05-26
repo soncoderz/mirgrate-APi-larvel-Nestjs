@@ -18,6 +18,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ConnectorGuard } from './guards/connector.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { DateHelperService } from './services/date-helper.service';
+import { JwtBlacklistService } from './services/jwt-blacklist.service';
 import { MigrationStubService } from './services/migration-stub.service';
 import { QueryHelperService } from './services/query-helper.service';
 
@@ -52,6 +53,7 @@ import { QueryHelperService } from './services/query-helper.service';
 
     // Helper Services - Các tiện ích dùng chung
     DateHelperService,     // Xử lý ngày tháng (parse date range, so sánh tháng)
+    JwtBlacklistService,
     MigrationStubService,  // Tạo response cho endpoint chưa được migrate
     QueryHelperService,    // Hỗ trợ query: pagination, LIKE escape
   ],
@@ -60,6 +62,7 @@ import { QueryHelperService } from './services/query-helper.service';
     ConnectorGuard,
     DateHelperService,
     JwtAuthGuard,
+    JwtBlacklistService,
     MigrationStubService,
     QueryHelperService,
     JwtModule,  // Export JwtModule để các module khác dùng JwtService

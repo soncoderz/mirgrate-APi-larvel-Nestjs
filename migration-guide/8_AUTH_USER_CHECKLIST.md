@@ -13,10 +13,14 @@ Snapshot ngay 2026-05-26:
 - Auth/User da code logic cho nhom endpoint core va them cac endpoint:
   `updateUserInfoByField`, `getUserNameByAgentsView`, `getUserTeam`,
   `deleteUser`, `deleteUsers`, `duplicateUser`, `logoutUserManual`.
+- `POST /api/v1/logout` da cap nhat de invalidate JWT hien tai bang in-memory blacklist,
+  clear `users.remember_token`, va update `users_log` theo Laravel behavior.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
   dang bi block vi source Laravel dang import model/table khong co trong source/schema hien tai.
+- Bat buoc cap nhat checklist/plan moi khi sua code, behavior, env/config, guard, Swagger,
+  DB side effect hoac blocker.
 
 ## 1. Setup truoc khi code
 
@@ -38,7 +42,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | CODED_PENDING_POSTMAN | `POST /api/v1/login` | `UsersController@login` | Tao JWT, update login state, ghi `users_log` |
 | CODED_PENDING_POSTMAN | `GET /api/v1/me` | `UsersController@me` | Protected route |
 | CODED_PENDING_POSTMAN | `POST /api/v1/checkToken` | route maps to `UsersController@me` | Phai match route Laravel, du ten endpoint la `checkToken` |
-| CODED_PENDING_POSTMAN | `POST /api/v1/logout` | `UsersController@logout` | Update `isOnline`, `users_log` |
+| CODED_PENDING_POSTMAN | `POST /api/v1/logout` | `UsersController@logout` | Invalidate Bearer token, clear `remember_token`, update `users_log` |
 | CODED_PENDING_POSTMAN | `POST /api/v1/getUserToken` | `UsersController@getUserToken` | Token API integration |
 | CODED_PENDING_POSTMAN | `POST /api/v1/resetPassword` | `UsersController@resetPassword` | Password verify + update |
 | CODED_PENDING_POSTMAN | `POST /api/v1/forgotPassword` | `UsersController@forgotPassword` | Email/reset token behavior |
@@ -78,6 +82,7 @@ Hold until source/sample is clear:
 - [ ] Preserve response shape exactly, including raw arrays/objects if Laravel returns them.
 - [ ] Use same JWT secret/algo as Laravel.
 - [ ] Protected endpoints must reject invalid JWT like Laravel.
+- [ ] Logout must invalidate the current JWT so protected routes reject it after logout.
 - [ ] Do not return `password` or `remember_token`.
 - [ ] Do not log or expose `.env` secret values.
 - [ ] Use prepared statements for all raw SQL.

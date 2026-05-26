@@ -60,6 +60,7 @@ import * as bcrypt from "bcrypt";
 import { createHash, randomBytes } from "crypto";
 import { Request } from "express";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
+import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
 import { DatabaseService } from "../../config/database.service";
 
 /** Type alias cho database row kết quả query */
@@ -126,6 +127,7 @@ export class UsersService {
     private readonly database: DatabaseService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly blacklist: JwtBlacklistService,
   ) {}
 
   async login(body: Record<string, any>, request: Request) {
@@ -277,6 +279,7 @@ export class UsersService {
     try {
       payload = await this.jwt.verifyAsync<AuthPayload>(token, {
         secret: this.jwtSecret(),
+        algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
       });
     } catch {
       return {
@@ -285,8 +288,36 @@ export class UsersService {
     }
 
     const logId = Number(body.id);
+    let log: DbRow | undefined;
     if (Number.isFinite(logId) && logId > 0) {
-      const log = await this.findUserLogById(logId);
+      log = await this.findUserLogById(logId);
+    }
+
+    const userId = Number(payload.sub ?? payload.id);
+    const userRows =
+      Number.isFinite(userId) && userId > 0
+        ? await this.database.query<DbRow[]>(
+            "main",
+            "SELECT id, remember_token FROM users WHERE id = ? LIMIT 1",
+            [userId],
+          )
+        : [];
+    const user = userRows[0];
+
+    if (log) {
+      if (user) {
+        if (user.remember_token) {
+          await this.invalidateStoredToken(String(user.remember_token));
+        }
+
+        await this.database
+          .pool("main")
+          .execute<ResultSetHeader>(
+            "UPDATE users SET remember_token = NULL WHERE id = ?",
+            [user.id],
+          );
+      }
+
       if (log?.status === "sign-in") {
         await this.database
           .pool("main")
@@ -297,15 +328,7 @@ export class UsersService {
       }
     }
 
-    const userId = Number(payload.sub ?? payload.id);
-    if (Number.isFinite(userId) && userId > 0) {
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          "UPDATE users SET remember_token = NULL, isOnline = 0 WHERE id = ?",
-          [userId],
-        );
-    }
+    this.invalidateToken(token, (payload as { exp?: number }).exp);
 
     return { message: "Logout success", code: 200 };
   }
@@ -1670,6 +1693,22 @@ export class UsersService {
       code: 200,
       message: "Success",
     };
+  }
+
+  private invalidateToken(token: string, exp?: number) {
+    this.blacklist.invalidate(token, exp);
+  }
+
+  private async invalidateStoredToken(token: string) {
+    try {
+      const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
+        secret: this.jwtSecret(),
+        algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
+      });
+      this.invalidateToken(token, (payload as { exp?: number }).exp);
+    } catch {
+      // Laravel JWTAuth::invalidate() ignores invalid/expired remember_token here.
+    }
   }
 
   private extractRequestToken(body: Record<string, any>, request: Request) {

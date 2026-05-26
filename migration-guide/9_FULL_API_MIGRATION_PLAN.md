@@ -21,6 +21,11 @@ Snapshot ngay 2026-05-26:
 - M1 Auth/User dang `IN_PROGRESS`: core auth/user endpoints da co service logic, them cac endpoint
   `updateUserInfoByField`, `getUserNameByAgentsView`, `getUserTeam`, `deleteUser`,
   `deleteUsers`, `duplicateUser`, `logoutUserManual`.
+- Swagger da duoc cau hinh tai `SWAGGER_PATH` mac dinh `api/docs` de test API.
+- Logout da co JWT blacklist in-memory de reject token sau khi logout; neu can parity qua restart,
+  can nang cap blacklist sang Redis/DB.
+- Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
+  migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
 
 ## 1. Completion milestones
@@ -68,6 +73,7 @@ Can co cac service/helper chung:
 - `PaginationService`: tao pagination keys giong Laravel.
 - `ExportStorageService`: file path, public URL, cleanup export files.
 - `PostmanParityLog`: ghi endpoint status va request sample path.
+- `JwtBlacklistService`: invalidate JWT sau logout; hien tai in-memory, co the doi sang Redis/DB neu can persist qua restart.
 
 ### 2.3. Guards
 
@@ -144,7 +150,7 @@ Status values:
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/login` | `UsersController@login` |
 | BLOCKED | M1 | POST | `/api/v1/loginv2` | `UsersController@loginv3` missing in source |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/loginExternal` | `UsersController@loginExternal` |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/logout` | `UsersController@logout` |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/logout` | `UsersController@logout`; invalidates Bearer token |
 | BLOCKED | M1 | POST | `/api/v1/logoutv2` | `UsersController@logoutv2`; verify source/sample |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsCompany` | `UsersController@addUserAsCompany` |
 | DEFERRED | M8 | POST | `/api/v1/addUserByExcel` | `UsersController@addUserByExcel` |

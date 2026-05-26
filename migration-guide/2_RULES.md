@@ -18,9 +18,15 @@ Trong suốt quá trình migration, bạn cần tuân thủ nghiêm ngặt các 
 - **Http Status Codes**: Trả về đúng Http Status Code như Laravel (ví dụ: Validation error trả về `406 Invalid parameters` thay vì mặc định `400 Bad Request` của NestJS).
 - **Global Exception Filter**: Viết Filter chung để định dạng lại toàn bộ lỗi hệ thống về định dạng chuẩn mà client (Frontend/Mobile app) đang mong đợi.
 
+## 5. Documentation Update Rule
+- **Bat buoc cap nhat tai lieu khi sua code**: Moi lan sua route, request/response, auth behavior, DB side effect, env/config, Swagger, guard, service logic, hoac trang thai blocker thi phai cap nhat file migration guide lien quan trong cung luot lam viec.
+- **Khong chi sua source code**: Neu endpoint duoc code them/sua behavior nhung chua co Postman parity, cap nhat status thanh `CODED_PENDING_POSTMAN` va ghi note ro phan da doi.
+- **Khi co blocker moi**: Cap nhat `8_AUTH_USER_CHECKLIST.md` neu thuoc Auth/User, va cap nhat `9_FULL_API_MIGRATION_PLAN.md` neu anh huong full API plan.
+- **Khi them ha tang chung**: Cap nhat `2_RULES.md`, `3_AGENT_WORKFLOW.md`, hoac `9_FULL_API_MIGRATION_PLAN.md` tuy pham vi. Vi du: Swagger, JWT blacklist, guard behavior, env moi.
+
 ---
 
-## 5. Câu hỏi Ôn tập & Tự đánh giá (Rules Review Questions)
+## 6. Câu hỏi Ôn tập & Tự đánh giá (Rules Review Questions)
 1. **Database Safety**: Tại sao quy tắc `synchronize: false` trong cấu hình TypeORM là bắt buộc đối với một dự án migration? Điều gì sẽ xảy ra nếu vô tình kích hoạt `synchronize: true` trên cơ sở dữ liệu đã có sẵn dữ liệu của khách hàng?
 2. **SQL Injection**: Hãy viết ví dụ một đoạn code thực hiện Raw SQL trong NestJS vi phạm quy tắc an toàn (bị SQL Injection) và sửa lại cho đúng quy tắc sử dụng Prepared Statement.
 3. **API Compatibility**: Nếu Laravel trả về cấu trúc lỗi Validation với mã HTTP `406 Not Acceptable`, nhưng NestJS mặc định trả về `400 Bad Request`, chúng ta cần làm gì ở tầng ứng dụng NestJS để đồng bộ hành vi này mà không sửa đổi code client?
