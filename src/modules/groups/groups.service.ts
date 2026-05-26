@@ -34,6 +34,7 @@
  */
 
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { RowDataPacket } from "mysql2";
 import { DatabaseService } from "../../config/database.service";
@@ -43,6 +44,7 @@ export class GroupsService {
   constructor(
     private readonly database: DatabaseService,
     private readonly jwt: JwtService,
+    private readonly config: ConfigService,
   ) {}
 
   async getGroupBySecret(secret?: string) {
@@ -75,6 +77,9 @@ export class GroupsService {
           role: user.role,
           groupId: user.groupId,
           typeId: user.typeId,
+        }, {
+          expiresIn: this.config.get<string>("JWT_EXPIRES_IN", "1d") as never,
+          algorithm: this.config.get<string>("JWT_ALGO", "HS256") as never,
         })
       : null;
 

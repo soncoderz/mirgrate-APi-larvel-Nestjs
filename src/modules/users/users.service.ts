@@ -57,7 +57,7 @@ import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { Request } from "express";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { DatabaseService } from "../../config/database.service";
@@ -181,18 +181,45 @@ export class UsersService {
       this.throwLockedAccount();
     }
 
-    const group = await this.getGroupForLogin(user.groupId);
-    if (group?.status === "lock") {
+    const token = await this.signUserToken(
+      user,
+      Boolean(body.remember_token),
+      request,
+    );
+
+    const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
+      secret: this.jwtSecret(),
+      algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
+    });
+    const curUser = await this.findUserById(Number(payload.sub ?? payload.id), false);
+    if (!curUser) {
+      throw new HttpException(
+        { error: "Unauthorized - invalid token or user not found" },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    const group = await this.getGroupForLogin(curUser.groupId);
+    if (!group || group.status === "lock") {
       this.throwLockedAccount();
     }
 
-    const token = await this.signUserToken(user, Boolean(body.remember_token));
+    // if (this.isUserAlreadyOnline(curUser) && curUser.role !== "superadmin") {
+    //   this.throwError(
+    //     {
+    //       author: "Tài khoản đang được đăng nhập.",
+    //       alias: "Error_Using_Account",
+    //     },
+    //     HttpStatus.NOT_ACCEPTABLE,
+    //     "Error_Pending_Account",
+    //   );
+    // }
 
     const userLog = await this.insertUserLog({
       username: email,
       password,
       ip_address: clientIp,
-      groupid: user.groupId,
+      groupid: curUser.groupId,
       status: "sign-in",
       sign_in_time: this.unixNow(),
     });
@@ -201,30 +228,37 @@ export class UsersService {
       .pool("main")
       .execute<ResultSetHeader>(
         "UPDATE users SET lastLogin = ?, isOnline = 1 WHERE id = ?",
-        [this.nowSql(), user.id],
+        [this.nowSql(), curUser.id],
       );
 
-    const currentUser = await this.findUserById(user.id, false);
-    const privileges = await this.getUserPermissions(user.typeId);
-    const [queueName, agentsView] = await this.getQueueAndAgents(currentUser);
-    const groupHotline = await this.getGroupHotline(user.groupId);
+    const responseUser = this.sanitizeUser({ ...user });
+    const [privileges] = await this.processPrivileges(curUser);
+    const [queueConfig, agentsView] = await this.getQueueAndAgents(
+      curUser,
+      responseUser,
+    );
+    const groupHotline = await this.getGroupHotline(curUser.groupId);
+
+    for (const value of groupHotline) {
+      if (value.queue_config && this.isJson(value.queue_config)) {
+        this.assignMissing(queueConfig, JSON.parse(value.queue_config));
+      }
+    }
 
     if (group) {
-      group.socket_url =
-        this.config.get<string>("SOCKET_URL") ?? group.socket_url;
-      group.recording_url =
-        this.config.get<string>("RECORDING_URL") ?? group.recording_url;
+      group.socket_url = this.config.get<string>("SOCKET_URL") ?? null;
+      group.recording_url = this.config.get<string>("RECORDING_URL") ?? null;
     }
 
     return {
       success: {
         token,
-        user: this.sanitizeUser(currentUser),
+        user: responseUser,
         group,
         group_hotline: groupHotline,
         privilege: privileges,
         user_log: userLog,
-        queue_name: queueName,
+        queue_name: queueConfig,
         agents_view: agentsView,
       },
     };
@@ -519,7 +553,7 @@ export class UsersService {
         );
       }
 
-      token = await this.signUserToken(user, Boolean(body.remember_token));
+      token = await this.signUserToken(user, Boolean(body.remember_token), request);
     } else {
       const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
         secret: this.jwtSecret(),
@@ -1846,53 +1880,131 @@ export class UsersService {
     );
   }
 
+  private isJson(str: any): boolean {
+    if (typeof str !== "string") {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(str);
+      return parsed && typeof parsed === "object";
+    } catch {
+      return false;
+    }
+  }
+
+  private assignMissing(target: Record<string, any>, source: Record<string, any>) {
+    for (const [key, value] of Object.entries(source)) {
+      if (!Object.prototype.hasOwnProperty.call(target, key)) {
+        target[key] = value;
+      }
+    }
+  }
+
+  private randomJwtId() {
+    return randomBytes(16)
+      .toString("base64")
+      .replace(/[+/=]/g, "")
+      .slice(0, 16);
+  }
+
+  private requestUrl(request: Request) {
+    const forwardedProto = this.headerToString(request.headers["x-forwarded-proto"]);
+    const proto = forwardedProto ?? request.protocol ?? "http";
+    const host = request.get("host") ?? "localhost";
+    const path = (request.originalUrl || request.url || "").split("?")[0];
+    return `${proto}://${host}${path}`;
+  }
+
+  private isUserAlreadyOnline(user: DbRow | undefined): boolean {
+    if (!user) return false;
+    return Number(user.isOnline) === 1;
+  }
+
+  private async processPrivileges(user: DbRow | undefined): Promise<[any[], number, number]> {
+    if (!user) {
+      return [[], 0, 0];
+    }
+    const privileges = await this.getUserPermissions(user.typeId);
+    let isWebRTC = 0;
+    let isReceiveChat = 0;
+
+    for (const priv of privileges) {
+      if (priv.page === "userWebRTC" && priv.permission === "view") {
+        isWebRTC = 1;
+      }
+      if (priv.page === "omnichannel" && priv.permission === "view") {
+        isReceiveChat = 1;
+      }
+    }
+
+    return [privileges, isWebRTC, isReceiveChat];
+  }
+
   private async getQueueAndAgents(
+    curUser: DbRow | undefined,
     user: DbRow | undefined,
   ): Promise<[Record<string, any>, Record<string, any>]> {
-    if (!user) {
+    if (!curUser || !user) {
       return [{}, {}];
     }
 
-    const queueName: Record<string, any> = {};
-    const hotlines =
-      user.role === "superadmin"
-        ? await this.database.query<DbRow[]>(
-            "main",
-            "SELECT queues,extensions,queue_config FROM group_hotline",
-            [],
-          )
-        : await this.database.query<DbRow[]>(
-            "main",
-            "SELECT queues,extensions,queue_config FROM group_hotline WHERE groupId = ? AND status = ?",
-            [user.groupId, "publish"],
-          );
+    const queueConfig: Record<string, any> = {};
+    if (user.role === "superadmin") {
+      const hotlines = await this.database.query<DbRow[]>(
+        "main",
+        "SELECT queues, extensions, queue_config FROM group_hotline",
+        [],
+      );
+      const queues: string[] = [];
+      const extensions: string[] = [];
 
-    for (const hotline of hotlines) {
-      Object.assign(queueName, this.parseJsonObject(hotline.queue_config));
+      for (const hotline of hotlines) {
+        if (hotline.queues) {
+          queues.push(...String(hotline.queues).split(",").map(s => s.trim()).filter(Boolean));
+        }
+        if (hotline.extensions) {
+          extensions.push(...String(hotline.extensions).split(",").map(s => s.trim()).filter(Boolean));
+        }
+        if (hotline.queue_config && this.isJson(hotline.queue_config)) {
+          this.assignMissing(queueConfig, JSON.parse(hotline.queue_config));
+        }
+      }
+
+      const userCodesRows = await this.database.query<DbRow[]>(
+        "main",
+        "SELECT userCode FROM users WHERE status <> 'trash'",
+        [],
+      );
+      const agentsViewStr = userCodesRows.map(r => r.userCode).filter(Boolean).join(",");
+
+      user.queues = queues.join(",");
+      user.extensions_view = extensions.join(",");
+      user.agents_view = agentsViewStr;
+
+      const agents = await this.database.query<DbRow[]>(
+        "main",
+        `
+          SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
+          FROM users
+          WHERE status <> 'trash'
+        `,
+        [],
+      );
+
+      return [queueConfig, this.keyBy(agents, "extension")];
+    } else {
+      const agents = await this.database.query<DbRow[]>(
+        "main",
+        `
+          SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
+          FROM users
+          WHERE status <> 'trash' AND groupId = ?
+        `,
+        [curUser.groupId],
+      );
+
+      return [queueConfig, this.keyBy(agents, "extension")];
     }
-
-    const agents =
-      user.role === "superadmin"
-        ? await this.database.query<DbRow[]>(
-            "main",
-            `
-              SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
-              FROM users
-              WHERE status <> 'trash'
-            `,
-            [],
-          )
-        : await this.database.query<DbRow[]>(
-            "main",
-            `
-              SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
-              FROM users
-              WHERE status <> 'trash' AND groupId = ?
-            `,
-            [user.groupId],
-          );
-
-    return [queueName, this.keyBy(agents, "extension")];
   }
 
   private async insertUserLog(input: Record<string, any>) {
@@ -1921,7 +2033,12 @@ export class UsersService {
       "SELECT * FROM users_log WHERE id = ? LIMIT 1",
       [result.insertId],
     );
-    return rows[0];
+    const row = rows[0];
+    if (row && row.groupid !== undefined) {
+      row.groupId = row.groupid;
+      delete row.groupid;
+    }
+    return row;
   }
 
   private async findUserLogById(id: number) {
@@ -2261,10 +2378,22 @@ export class UsersService {
     return rows[0]?.userCode ?? String(Date.now());
   }
 
-  private signUserToken(user: DbRow, remember: boolean) {
+  private signUserToken(user: DbRow, remember: boolean, request?: Request) {
+    const issuedAt = this.unixNow();
+    const ttlMinutes = Number(this.config.get<string>("JWT_TTL", "60"));
+    const expiresAt = remember
+      ? issuedAt + 14 * 24 * 60 * 60
+      : issuedAt + (Number.isFinite(ttlMinutes) ? ttlMinutes : 60) * 60;
+
     return this.jwt.signAsync(
       {
+        iss: request ? this.requestUrl(request) : this.config.get<string>("APP_URL", "http://localhost"),
+        iat: issuedAt,
+        exp: expiresAt,
+        nbf: issuedAt,
+        jti: this.randomJwtId(),
         sub: user.id,
+        prv: createHash("sha1").update("App\\Models\\User").digest("hex"),
         id: user.id,
         email: user.email,
         role: user.role,
@@ -2273,9 +2402,6 @@ export class UsersService {
       },
       {
         secret: this.jwtSecret(),
-        expiresIn: (remember
-          ? "14d"
-          : this.config.get<string>("JWT_EXPIRES_IN", "1d")) as never,
         algorithm: this.config.get<string>("JWT_ALGO", "HS256") as never,
       },
     );

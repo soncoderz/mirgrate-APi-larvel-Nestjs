@@ -40,7 +40,6 @@ import { QueryHelperService } from './services/query-helper.service';
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET', ''),
         signOptions: {
-          expiresIn: config.get<string>('JWT_EXPIRES_IN', '1d') as never,
           algorithm: config.get<string>('JWT_ALGO', 'HS256') as never,
         },
       }),
