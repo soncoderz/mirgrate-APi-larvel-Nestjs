@@ -88,7 +88,7 @@ export class UsersController {
     @Body() body: Record<string, unknown>,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.getUsers(body, request.user);
+    return this.users.getUsers(body, request.user, request);
   }
 
   @Post("usersByRole")

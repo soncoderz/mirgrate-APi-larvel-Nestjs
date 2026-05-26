@@ -17,6 +17,10 @@ Snapshot ngay 2026-05-26:
   clear `users.remember_token`, va update `users_log` theo Laravel behavior.
 - `POST /api/v1/checkToken` da check JWT blacklist, token da logout se tra
   `{ message: "Token is invalid", code: 401 }`.
+- `POST /api/v1/users` da cap nhat query theo Laravel `getUsers`: select `users.*`
+  kem `departmentName`, `typeName`, `groupName`, `emailqr`, `created_name`,
+  `updated_name`, `is_hotdesk`, `transports`, `port`, `is_google2fa`; ho tro
+  filter/sort Laravel format, validate `recordsOnPage`, va paginator URL/links.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
@@ -49,7 +53,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | CODED_PENDING_POSTMAN | `POST /api/v1/resetPassword` | `UsersController@resetPassword` | Password verify + update |
 | CODED_PENDING_POSTMAN | `POST /api/v1/forgotPassword` | `UsersController@forgotPassword` | Email/reset token behavior |
 | CODED_PENDING_POSTMAN | `POST /api/v1/changePasswordForgot` | `UsersController@changePasswordForgot` | Reset password by token |
-| CODED_PENDING_POSTMAN | `POST /api/v1/users` | `UsersController@getUsers` | Pagination/filter/sort |
+| CODED_PENDING_POSTMAN | `POST /api/v1/users` | `UsersController@getUsers` | Match Laravel select/join/filter/sort/paginator shape |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByRole` | `UsersController@getUsersByRole` | Role filter |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByExt` | `UsersController@getUserInfoByExtension` | Also used by connector |
 | CODED_PENDING_POSTMAN | `GET /api/v1/user/:id` | `UsersController@getUserByID` | Hide password fields |

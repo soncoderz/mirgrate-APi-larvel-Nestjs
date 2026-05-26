@@ -121,6 +121,66 @@ const USER_MUTABLE_COLUMNS = new Set([
   "groups_view",
 ]);
 
+const USER_TABLE_COLUMNS = new Set([
+  "id",
+  "userCode",
+  "firstName",
+  "lastName",
+  "mobile",
+  "phone",
+  "avatar",
+  "email",
+  "password",
+  "typeId",
+  "groupId",
+  "lastLogin",
+  "loginType",
+  "status",
+  "address",
+  "extension",
+  "extensions_view",
+  "agents_view",
+  "queues",
+  "queues_config",
+  "note",
+  "role",
+  "isOnline",
+  "remember_token",
+  "created_at",
+  "created_by",
+  "updated_at",
+  "updated_by",
+  "trashed_at",
+  "trashed_by",
+  "departmentId",
+  "queueDynamic",
+  "config",
+  "time_auto_resume",
+  "groups_view",
+  "firstLogin",
+  "is_verify",
+  "is_salesforce",
+  "lock_time",
+  "otherId",
+  "otherEmail",
+  "google2fa_secret",
+  "is_google2fa",
+]);
+
+const USER_FILTER_TYPES = new Set([
+  "like",
+  "like_left",
+  "like_right",
+  "not_like",
+  "not_like_left",
+  "not_like_right",
+  "more",
+  "less",
+  "other",
+  "more_equal",
+  "more_less",
+]);
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -808,7 +868,11 @@ export class UsersService {
     };
   }
 
-  async getUsers(body: Record<string, any>, payload: AuthPayload | undefined) {
+  async getUsers(
+    body: Record<string, any>,
+    payload: AuthPayload | undefined,
+    request?: Request,
+  ) {
     const currentUser = await this.getCurrentUser(payload);
     if (!currentUser) {
       throw new HttpException(
@@ -821,7 +885,7 @@ export class UsersService {
     const params: any[] = ["trash"];
 
     if (currentUser?.role !== "superadmin") {
-      if (body.groupId) {
+      if (!this.isPhpEmpty(body.groupId)) {
         where.push("users.groupId = ?");
         params.push(body.groupId);
       } else if (Number(currentUser?.groupId) === 1) {
@@ -831,27 +895,27 @@ export class UsersService {
         where.push("users.groupId = ?");
         params.push(currentUser.groupId);
       }
-    } else if (body.groupId) {
+    } else if (!this.isPhpEmpty(body.groupId)) {
       where.push("users.groupId = ?");
       params.push(body.groupId);
     }
 
-    if (body.departmentId) {
+    if (!this.isPhpEmpty(body.departmentId)) {
       where.push("users.departmentId = ?");
       params.push(body.departmentId);
     }
 
-    if (body.typeId) {
+    if (!this.isPhpEmpty(body.typeId)) {
       where.push("users.typeId = ?");
       params.push(body.typeId);
     }
 
-    if (body.roleId) {
+    if (!this.isPhpEmpty(body.roleId)) {
       where.push("users.role = ?");
       params.push(body.roleId);
     }
 
-    if (body.search && !Array.isArray(body.search)) {
+    if (!this.isPhpEmpty(body.search) && !Array.isArray(body.search)) {
       const keyword = `%${String(body.search)}%`;
       where.push(`(
         users.firstName LIKE ? OR users.lastName LIKE ? OR users.email LIKE ?
@@ -867,20 +931,27 @@ export class UsersService {
       );
     }
 
+    this.applyUserFilters(body.filters, where, params);
+
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const perPage = this.normalizePageSize(
-      body.recordsOnPage ?? body.limit ?? 10,
-    );
-    const currentPage = this.normalizePage(body.page ?? body.current_page ?? 1);
+    const perPage = this.normalizeLaravelRecordsOnPage(body.recordsOnPage);
+    const currentPage = this.normalizePage(body.page ?? 1);
     const offset = (currentPage - 1) * perPage;
     const orderSql = this.buildUserOrderSql(body.sorts);
+    const usersFromSql = `
+        FROM users
+        LEFT JOIN departments ON departments.id = users.departmentId
+        LEFT JOIN user_types ON user_types.id = users.typeId
+        LEFT JOIN \`groups\` ON \`groups\`.id = users.groupId
+        LEFT JOIN qr_code ON qr_code.userId = users.id
+        LEFT JOIN user_config ON user_config.userid = users.id
+    `;
 
     const countRows = await this.database.query<DbRow[]>(
       "main",
       `
         SELECT COUNT(*) AS total
-        FROM users
-        LEFT JOIN user_types ON user_types.id = users.typeId
+        ${usersFromSql}
         ${whereSql}
       `,
       params,
@@ -894,7 +965,7 @@ export class UsersService {
           users.*,
           departments.name AS departmentName,
           user_types.name AS typeName,
-          g.groupName,
+          \`groups\`.groupName,
           qr_code.email AS emailqr,
           (SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users AS u2 WHERE u2.id = users.created_by) AS created_name,
           (SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users AS u2 WHERE u2.id = users.updated_by) AS updated_name,
@@ -902,12 +973,7 @@ export class UsersService {
           IF(user_config.transports IS NOT NULL, user_config.transports, NULL) AS transports,
           IF(user_config.port IS NOT NULL, user_config.port, NULL) AS port,
           users.is_google2fa
-        FROM users
-        LEFT JOIN departments ON departments.id = users.departmentId
-        LEFT JOIN user_types ON user_types.id = users.typeId
-        LEFT JOIN \`groups\` AS g ON g.id = users.groupId
-        LEFT JOIN qr_code ON qr_code.userId = users.id
-        LEFT JOIN user_config ON user_config.userid = users.id
+        ${usersFromSql}
         ${whereSql}
         ${orderSql}
         LIMIT ? OFFSET ?
@@ -916,23 +982,7 @@ export class UsersService {
     );
 
     const sanitizedData = data.map((user) => this.sanitizeUser(user));
-    const lastPage = Math.max(Math.ceil(total / perPage), 1);
-
-    return {
-      current_page: currentPage,
-      data: sanitizedData,
-      first_page_url: null,
-      from: total === 0 ? null : offset + 1,
-      last_page: lastPage,
-      last_page_url: null,
-      links: [],
-      next_page_url: currentPage < lastPage ? null : null,
-      path: null,
-      per_page: perPage,
-      prev_page_url: currentPage > 1 ? null : null,
-      to: total === 0 ? null : offset + sanitizedData.length,
-      total,
-    };
+    return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
   }
 
   async getUserByID(id: string) {
@@ -2462,40 +2512,122 @@ export class UsersService {
     return clone as T;
   }
 
+  private applyUserFilters(
+    filters: unknown,
+    where: string[],
+    params: any[],
+  ) {
+    if (
+      !filters ||
+      typeof filters !== "object" ||
+      Array.isArray(filters) ||
+      Object.keys(filters).length === 0
+    ) {
+      return;
+    }
+
+    for (const [column, rawFilter] of Object.entries(
+      filters as Record<string, any>,
+    )) {
+      const type = String(rawFilter?.type ?? "");
+      if (!USER_TABLE_COLUMNS.has(column) || !USER_FILTER_TYPES.has(type)) {
+        this.throwError(
+          { filter: "Cột không tồn tại hoặc kiểu lọc không cho phép." },
+          HttpStatus.NOT_ACCEPTABLE,
+          "Invalid parameters",
+        );
+      }
+
+      const keyword = rawFilter?.keyword;
+      if (this.isPhpEmpty(keyword)) {
+        continue;
+      }
+
+      const columnSql = `users.\`${column}\``;
+      switch (type) {
+        case "like":
+          where.push(`${columnSql} LIKE ?`);
+          params.push(`%${keyword}%`);
+          break;
+        case "like_left":
+          where.push(`${columnSql} LIKE ?`);
+          params.push(`%${keyword}`);
+          break;
+        case "like_right":
+          where.push(`${columnSql} LIKE ?`);
+          params.push(`${keyword}%`);
+          break;
+        case "not_like":
+          where.push(`${columnSql} NOT LIKE ?`);
+          params.push(`%${keyword}%`);
+          break;
+        case "not_like_left":
+          where.push(`${columnSql} NOT LIKE ?`);
+          params.push(`%${keyword}`);
+          break;
+        case "not_like_right":
+          where.push(`${columnSql} NOT LIKE ?`);
+          params.push(`${keyword}%`);
+          break;
+        case "more":
+          where.push(`${columnSql} > ?`);
+          params.push(keyword);
+          break;
+        case "less":
+          where.push(`${columnSql} < ?`);
+          params.push(keyword);
+          break;
+        case "other":
+          where.push(`${columnSql} <> ?`);
+          params.push(keyword);
+          break;
+        case "more_equal":
+          where.push(`${columnSql} >= ?`);
+          params.push(keyword);
+          break;
+        case "more_less":
+          where.push(`${columnSql} <= ?`);
+          params.push(keyword);
+          break;
+      }
+    }
+  }
+
   private buildUserOrderSql(sorts: unknown) {
-    if (!Array.isArray(sorts) || sorts.length === 0) {
+    if (
+      !sorts ||
+      typeof sorts !== "object" ||
+      (Array.isArray(sorts) && sorts.length === 0)
+    ) {
       return "ORDER BY users.id DESC";
     }
 
-    const allowed = new Set([
-      "id",
-      "firstName",
-      "lastName",
-      "email",
-      "extension",
-      "role",
-      "status",
-      "created_at",
-      "updated_at",
-    ]);
-    const order = sorts
-      .map((sort) => {
-        const name = String(sort?.name ?? sort?.field ?? "");
-        if (!allowed.has(name)) {
+    const entries = Array.isArray(sorts)
+      ? sorts.map((sort) => [
+          String(sort?.name ?? sort?.field ?? ""),
+          sort?.direction ?? sort?.order,
+        ])
+      : Object.entries(sorts as Record<string, unknown>);
+
+    const order = entries
+      .map(([name, rawDirection]) => {
+        if (!USER_TABLE_COLUMNS.has(name)) {
           return undefined;
         }
         const direction =
-          String(sort?.direction ?? sort?.order ?? "asc").toLowerCase() ===
-          "desc"
+          String(rawDirection ?? "").toLowerCase() === "desc"
             ? "DESC"
-            : "ASC";
+            : String(rawDirection ?? "").toLowerCase() === "asc"
+              ? "ASC"
+              : undefined;
+        if (!direction) {
+          return undefined;
+        }
         return `users.\`${name}\` ${direction}`;
       })
       .filter(Boolean);
 
-    return order.length
-      ? `ORDER BY ${order.join(", ")}`
-      : "ORDER BY users.id DESC";
+    return order.length ? `ORDER BY ${order.join(", ")}` : "";
   }
 
   private buildUserLogOrderSql(sort: unknown) {
@@ -2518,6 +2650,92 @@ export class UsersService {
     }
 
     return `ORDER BY ${column} ${String(value) === "1" ? "ASC" : "DESC"}`;
+  }
+
+  private paginateLaravel(
+    data: DbRow[],
+    total: number,
+    perPage: number,
+    currentPage: number,
+    request?: Request,
+  ) {
+    const lastPage = Math.max(Math.ceil(total / perPage), 1);
+    const path = request ? this.requestPathWithoutQuery(request) : null;
+    const from = data.length === 0 ? null : (currentPage - 1) * perPage + 1;
+    const to =
+      data.length === 0 ? null : (currentPage - 1) * perPage + data.length;
+
+    return {
+      current_page: currentPage,
+      data,
+      first_page_url: this.paginationUrl(path, 1),
+      from,
+      last_page: lastPage,
+      last_page_url: this.paginationUrl(path, lastPage),
+      links: this.paginationLinks(path, currentPage, lastPage),
+      next_page_url:
+        currentPage < lastPage ? this.paginationUrl(path, currentPage + 1) : null,
+      path,
+      per_page: perPage,
+      prev_page_url:
+        currentPage > 1 ? this.paginationUrl(path, currentPage - 1) : null,
+      to,
+      total,
+    };
+  }
+
+  private paginationLinks(
+    path: string | null,
+    currentPage: number,
+    lastPage: number,
+  ) {
+    const links: Array<{ url: string | null; label: string; active: boolean }> = [
+      {
+        url:
+          currentPage > 1
+            ? this.paginationUrl(path, currentPage - 1)
+            : null,
+        label: "&laquo; Previous",
+        active: false,
+      },
+    ];
+
+    for (let page = 1; page <= lastPage; page += 1) {
+      links.push({
+        url: this.paginationUrl(path, page),
+        label: String(page),
+        active: page === currentPage,
+      });
+    }
+
+    links.push({
+      url:
+        currentPage < lastPage
+          ? this.paginationUrl(path, currentPage + 1)
+          : null,
+      label: "Next &raquo;",
+      active: false,
+    });
+
+    return links;
+  }
+
+  private paginationUrl(path: string | null, page: number) {
+    return path ? `${path}?page=${page}` : null;
+  }
+
+  private requestPathWithoutQuery(request: Request) {
+    const host = this.headerToString(
+      request.headers["x-forwarded-host"] ?? request.headers.host,
+    );
+    if (!host) {
+      return request.originalUrl.split("?")[0];
+    }
+
+    const protocol = this.headerToString(request.headers["x-forwarded-proto"])
+      ?? request.protocol
+      ?? "http";
+    return `${protocol}://${host}${request.originalUrl.split("?")[0]}`;
   }
 
   private paginate(
@@ -2549,11 +2767,41 @@ export class UsersService {
     return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   }
 
+  private normalizeLaravelRecordsOnPage(value: unknown) {
+    if (this.isPhpEmpty(value)) {
+      return 10;
+    }
+
+    const size = Number(value);
+    if (Number.isFinite(size) && size > 0 && size <= 500) {
+      return Math.floor(size);
+    }
+
+    this.throwError(
+      {
+        records_on_pages:
+          "Số mẫu tin trên mỗi trang phải lớn hơn 0 và nhỏ hơn bằng 500.",
+      },
+      HttpStatus.NOT_ACCEPTABLE,
+      "Invalid parameters",
+    );
+  }
+
   private normalizePageSize(value: unknown) {
     const size = Number(value);
     return Number.isFinite(size) && size > 0
       ? Math.min(Math.floor(size), 500)
       : 10;
+  }
+
+  private isPhpEmpty(value: unknown) {
+    if (value === undefined || value === null || value === false) {
+      return true;
+    }
+    if (value === "" || value === "0" || value === 0) {
+      return true;
+    }
+    return Array.isArray(value) && value.length === 0;
   }
 
   private normalizeBcryptHash(hash: string) {

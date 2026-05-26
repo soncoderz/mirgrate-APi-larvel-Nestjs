@@ -25,6 +25,8 @@ Snapshot ngay 2026-05-26:
 - Logout da co JWT blacklist in-memory de reject token sau khi logout; neu can parity qua restart,
   can nang cap blacklist sang Redis/DB.
 - `POST /api/v1/checkToken` cung check JWT blacklist de token da logout tra `code: 401`.
+- `POST /api/v1/users` da cap nhat parity voi Laravel `getUsers`: full select/join fields,
+  filter/sort Laravel format, `recordsOnPage` 406 validation, va paginator URL/links.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
@@ -162,7 +164,7 @@ Status values:
 | Status | Phase | Method | Path | Laravel source |
 | --- | --- | --- | --- | --- |
 | CODED_PENDING_POSTMAN | M1 | GET | `/api/v1/me` | `UsersController@me` |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/users` | `UsersController@getUsers` |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/users` | `UsersController@getUsers`; full select/join/filter/sort/paginator parity |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/usersByRole` | `UsersController@getUsersByRole` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/usersByExt` | `UsersController@getUserInfoByExtension` |
 | CODED_PENDING_POSTMAN | M1 | GET | `/api/v1/user/{id}` | `UsersController@getUserByID` |
