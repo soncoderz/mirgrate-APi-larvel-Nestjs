@@ -1751,10 +1751,15 @@ export class UsersService {
 
   private getClientIp(request: Request) {
     const forwarded = request.headers["x-forwarded-for"];
-    if (Array.isArray(forwarded)) {
-      return forwarded[0] ?? request.ip ?? "Unknown";
+    let ip = Array.isArray(forwarded)
+      ? (forwarded[0] ?? request.ip ?? "Unknown")
+      : (forwarded?.split(",")[0]?.trim() || request.ip || "Unknown");
+
+    if (ip.startsWith("::ffff:")) {
+      ip = ip.substring(7);
     }
-    return forwarded?.split(",")[0]?.trim() || request.ip || "Unknown";
+
+    return ip.slice(0, 15);
   }
 
   private jwtSecret() {
