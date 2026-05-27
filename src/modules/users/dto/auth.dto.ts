@@ -38,4 +38,3 @@ export const requestUserPayloadSchema = z
     role: z.string().optional(),
   })
   .passthrough();
-export type RequestUserPayload = z.infer<typeof requestUserPayloadSchema>;

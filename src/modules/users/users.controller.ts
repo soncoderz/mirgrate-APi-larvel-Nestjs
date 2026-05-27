@@ -123,7 +123,7 @@ export class UsersController {
 
   /**
    * POST /api/v1/logout
-   * Đăng xuất - cập nhật trạng thái offline và ghi log
+   * Đăng xuất - cập nhật trạng thái offline vcheckTokenà ghi log
    *
    * @param body - { id?: number } - ID của user_log record
    * @param request - Express Request (để lấy token từ header)

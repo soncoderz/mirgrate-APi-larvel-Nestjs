@@ -32,7 +32,6 @@ import { extname, join } from "path";
 import { Request } from "express";
 import { Not, Brackets, SelectQueryBuilder, Between, In } from "typeorm";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
-import { UserEntity } from "./entities/user.entity";
 import { UserLogEntity } from "./entities/user-log.entity";
 import { updateUserSchema } from "./dto/update-user.dto";
 import { addUserAsMemberOfCompanySchema } from "./dto/create-user.dto";
@@ -53,22 +52,8 @@ export type AuthPayload = {
   typeId?: number;   // ID của loại phân quyền (user_types)
 };
 
-/**
- * USER_SAFE_SELECT - Danh sách các trường dữ liệu an toàn của User.
- * KHÔNG SELECT cột 'password' và 'remember_token' để tránh rò rỉ dữ liệu nhạy cảm.
- * Tương đương với thuộc tính $hidden trong Eloquent Model của Laravel.
- */
-export const USER_SAFE_SELECT = `
-  id,userCode,firstName,lastName,mobile,phone,avatar,email,typeId,groupId,
-  lastLogin,loginType,status,address,extension,extensions_view,agents_view,
-  queues,queues_config,note,role,isOnline,created_at,created_by,updated_at,
-  updated_by,trashed_at,trashed_by,departmentId,queueDynamic,config,
-  time_auto_resume,groups_view,firstLogin,is_verify,is_salesforce,lock_time,
-  otherId,otherEmail,google2fa_secret,is_google2fa
-`;
-
 /** Danh sách các trường có phép thay đổi khi cập nhật thông tin user */
-export const USER_MUTABLE_COLUMNS = new Set([
+const USER_MUTABLE_COLUMNS = new Set([
   "firstName",
   "lastName",
   "userCode",
@@ -96,7 +81,7 @@ export const USER_MUTABLE_COLUMNS = new Set([
 ]);
 
 /** Danh sách toàn bộ các cột trong bảng users dùng cho mục đích lọc và sắp xếp động */
-export const USER_TABLE_COLUMNS = new Set([
+const USER_TABLE_COLUMNS = new Set([
   "id",
   "userCode",
   "firstName",
@@ -143,7 +128,7 @@ export const USER_TABLE_COLUMNS = new Set([
 ]);
 
 /** Các kiểu toán tử lọc động được hỗ trợ trong API danh sách users */
-export const USER_FILTER_TYPES = new Set([
+const USER_FILTER_TYPES = new Set([
   "like",
   "like_left",
   "like_right",
@@ -159,6 +144,9 @@ export const USER_FILTER_TYPES = new Set([
 
 @Injectable()
 export class UsersService {
+  /**
+   * Inject repository, JWT, config và blacklist service dùng chung cho toàn bộ xử lý user.
+   */
   constructor(
     private readonly usersRepo: UsersRepository,
     private readonly jwt: JwtService,
@@ -166,6 +154,9 @@ export class UsersService {
     private readonly blacklist: JwtBlacklistService,
   ) {}
 
+  /**
+   * Xử lý đăng nhập: kiểm tra email/password, ghi log, tạo JWT và trả về user/group/privilege.
+   */
   async login(body: Record<string, any>, request: Request) {
     const email = String(body.email ?? "").trim();
     const password = String(body.password ?? "");
@@ -292,6 +283,9 @@ export class UsersService {
     };
   }
 
+  /**
+   * Xử lý đăng xuất: lấy bearer token, cập nhật user_log, xóa remember_token và đưa token vào blacklist.
+   */
   async logout(body: Record<string, any>, request: Request) {
     const token = this.extractBearerToken(request.headers.authorization);
     if (!token) {
@@ -353,6 +347,9 @@ export class UsersService {
     return { message: "Logout success", code: 200 };
   }
 
+  /**
+   * Kiểm tra payload JWT hiện tại và trả về trạng thái đơn giản cho endpoint /me.
+   */
   async me(payload: AuthPayload | undefined) {
     const user = await this.getCurrentUser(payload);
     if (!user) {
@@ -362,6 +359,9 @@ export class UsersService {
     return { message: "Success", code: 200 };
   }
 
+  /**
+   * Lấy danh sách user theo quyền hiện tại, filter/sort/search và phân trang kiểu Laravel.
+   */
   async getUsers(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -449,6 +449,9 @@ export class UsersService {
     return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
   }
 
+  /**
+   * Lấy chi tiết một user theo id, kèm thông tin liên quan nếu user tồn tại.
+   */
   async getUserByID(id: string) {
     const user = await this.findUserById(Number(id), true);
     if (!user) {
@@ -462,6 +465,9 @@ export class UsersService {
     return this.sanitizeUser(user);
   }
 
+  /**
+   * Cập nhật user hiện có, bao gồm thông tin chính, avatar, config phụ và lịch sử thay đổi.
+   */
   async updateUser(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -512,6 +518,9 @@ export class UsersService {
     };
   }
 
+  /**
+   * Tạo user mới trong một company/group, đồng bộ scope, avatar và lịch sử tạo mới.
+   */
   async addUserAsMemberOfCompany(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -594,10 +603,16 @@ export class UsersService {
     };
   }
 
+  /**
+   * Đưa token vào blacklist nội bộ để không thể tiếp tục sử dụng.
+   */
   private invalidateToken(token: string, exp?: number) {
     this.blacklist.invalidate(token, exp);
   }
 
+  /**
+   * Giải mã remember_token đang lưu và invalidate nếu token còn đọc được.
+   */
   private async invalidateStoredToken(token: string) {
     try {
       const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
@@ -610,30 +625,24 @@ export class UsersService {
     }
   }
 
+  /**
+   * Tách bearer token từ header Authorization theo định dạng "Bearer <token>".
+   */
   private extractBearerToken(authorization?: string): string | undefined {
     const [type, token] = authorization?.split(" ") ?? [];
     return type?.toLowerCase() === "bearer" ? token : undefined;
   }
 
-  private domainFromReferer(request: Request) {
-    const referer = this.headerToString(
-      request.headers.referer ?? request.headers.referrer,
-    );
-    if (!referer) {
-      return undefined;
-    }
-
-    try {
-      return new URL(referer).hostname;
-    } catch {
-      return undefined;
-    }
-  }
-
+  /**
+   * Chuẩn hóa header Express về một chuỗi duy nhất khi header có thể là mảng.
+   */
   private headerToString(value: string | string[] | undefined) {
     return Array.isArray(value) ? value[0] : value;
   }
 
+  /**
+   * Dựng URL đầy đủ của request để dùng làm issuer khi ký JWT.
+   */
   private requestUrl(request: Request) {
     const forwardedProto = this.headerToString(request.headers["x-forwarded-proto"]);
     const proto = forwardedProto ?? request.protocol ?? "http";
@@ -642,10 +651,16 @@ export class UsersService {
     return `${proto}://${host}${path}`;
   }
 
+  /**
+   * Tìm user theo email, dùng trong luồng đăng nhập.
+   */
   private async findUserByEmail(email: string) {
     return this.usersRepo.user.findOne({ where: { email } });
   }
 
+  /**
+   * Tìm user theo id, tự loại bỏ password/remember_token và tùy chọn nạp userType/userGroup.
+   */
   private async findUserById(
     id: number,
     includeRelations = false,
@@ -681,6 +696,9 @@ export class UsersService {
     return userObj;
   }
 
+  /**
+   * Tìm user theo id và giữ nguyên entity thô để phục vụ update hoặc so sánh dữ liệu.
+   */
   private async findRawUserById(id: number, includeTrashed = false) {
     if (!Number.isFinite(id) || id <= 0) {
       return undefined;
@@ -694,11 +712,17 @@ export class UsersService {
     })) ?? undefined;
   }
 
+  /**
+   * Lấy user hiện tại từ payload JWT bằng sub hoặc id.
+   */
   private async getCurrentUser(payload: AuthPayload | undefined) {
     const userId = Number(payload?.sub ?? payload?.id);
     return this.findUserById(userId, false, true);
   }
 
+  /**
+   * Lấy thông tin loại user từ bảng user_types.
+   */
   private async getUserType(id: number) {
     const rows = await this.usersRepo.manager.query(
       "SELECT * FROM user_types WHERE id = ? LIMIT 1",
@@ -707,17 +731,16 @@ export class UsersService {
     return rows[0] ?? null;
   }
 
+  /**
+   * Lấy group theo id từ repository group.
+   */
   private async getGroupById(id: number) {
     return (await this.usersRepo.group.findOne({ where: { id } })) ?? null;
   }
 
-  private async getTableColumns(table: "users") {
-    const rows = await this.usersRepo.manager.query(
-      `SHOW COLUMNS FROM \`${table}\``,
-    );
-    return rows.map((row) => String(row.Field));
-  }
-
+  /**
+   * Kiểm tra một bảng optional có tồn tại trong database hiện tại hay không.
+   */
   private async tableExists(table: string) {
     const rows = await this.usersRepo.manager.query(
       "SHOW TABLES LIKE ?",
@@ -726,10 +749,16 @@ export class UsersService {
     return rows.length > 0;
   }
 
+  /**
+   * Lấy group phục vụ đăng nhập và kiểm tra trạng thái khóa của company.
+   */
   private async getGroupForLogin(id: number) {
     return (await this.usersRepo.group.findOne({ where: { id } })) ?? null;
   }
 
+  /**
+   * Lấy danh sách hotline đang publish của group để ghép queue/extension config.
+   */
   private async getGroupHotline(groupId: number) {
     return this.usersRepo.manager.query(
       `
@@ -742,6 +771,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Lấy danh sách permission theo user type và chuẩn hóa thành mảng page/permission.
+   */
   private async getUserPermissions(typeId?: number) {
     if (!typeId) {
       return [];
@@ -768,6 +800,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Kiểm tra một chuỗi có phải JSON object/array hợp lệ hay không.
+   */
   private isJson(str: any): boolean {
     if (typeof str !== "string") {
       return false;
@@ -780,6 +815,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Merge các key còn thiếu từ source vào target, giữ nguyên giá trị đã có trong target.
+   */
   private assignMissing(target: Record<string, any>, source: Record<string, any>) {
     for (const [key, value] of Object.entries(source)) {
       if (!Object.prototype.hasOwnProperty.call(target, key)) {
@@ -788,6 +826,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Sinh JWT ID ngẫu nhiên ngắn để gắn vào claim jti.
+   */
   private randomJwtId() {
     return randomBytes(16)
       .toString("base64")
@@ -795,6 +836,9 @@ export class UsersService {
       .slice(0, 16);
   }
 
+  /**
+   * Lấy quyền của user và suy ra các cờ WebRTC/omnichannel dùng ở response login.
+   */
   private async processPrivileges(user: DbRow | undefined): Promise<[any[], number, number]> {
     if (!user) {
       return [[], 0, 0];
@@ -815,6 +859,9 @@ export class UsersService {
     return [privileges, isWebRTC, isReceiveChat];
   }
 
+  /**
+   * Tính queue config và danh sách agent nhìn thấy theo quyền superadmin hoặc theo group.
+   */
   private async getQueueAndAgents(
     curUser: DbRow | undefined,
     user: DbRow | undefined,
@@ -876,6 +923,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Ghi một bản ghi user_log cho đăng nhập, đăng xuất hoặc đăng nhập thất bại.
+   */
   private async insertUserLog(input: Record<string, any>) {
     const userLog = this.usersRepo.log.create({
       groupId: input.groupid ?? null,
@@ -894,10 +944,16 @@ export class UsersService {
     return savedLog;
   }
 
+  /**
+   * Tìm user_log theo id để cập nhật trạng thái sign-out khi logout.
+   */
   private async findUserLogById(id: number) {
     return this.usersRepo.log.findOne({ where: { id } });
   }
 
+  /**
+   * Xử lý đăng nhập thất bại do thiếu/sai tài khoản và khóa IP nếu vượt ngưỡng trong ngày.
+   */
   private async handleLoginFail(email: string, ip: string): Promise<never> {
     const total = await this.usersRepo.log.count({
       where: {
@@ -922,6 +978,9 @@ export class UsersService {
     this.throwInvalidAccount();
   }
 
+  /**
+   * Xử lý sai mật khẩu: đếm số lần fail từ lần đăng nhập gần nhất và khóa user nếu cần.
+   */
   private async handleInvalidPassword(email: string): Promise<never> {
     const lastLog = await this.usersRepo.log.findOne({
       where: {
@@ -950,6 +1009,9 @@ export class UsersService {
     this.throwInvalidAccount();
   }
 
+  /**
+   * Thêm hoặc cập nhật thời điểm khóa IP trong bảng ip_lock.
+   */
   private async lockIp(ip: string) {
     const rows = await this.usersRepo.manager.query(
       "SELECT id FROM ip_lock WHERE ip_client = ? LIMIT 1",
@@ -970,6 +1032,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Lọc body update theo cách Laravel: bỏ giá trị null/rỗng trừ các key được phép giữ.
+   */
   private filteredUpdateUserParams(body: Record<string, any>) {
     const keepNullKeys = new Set([
       "avatar",
@@ -990,6 +1055,9 @@ export class UsersService {
     return params;
   }
 
+  /**
+   * Validate dữ liệu update user bằng Zod và kiểm tra thêm email/group/limit user.
+   */
   private async validateUpdateUserZod(body: any, userId: number) {
     const schema = updateUserSchema.superRefine(async (data, ctx) => {
       if (data.email) {
@@ -1049,6 +1117,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Validate dữ liệu tạo member mới bằng Zod và kiểm tra thêm email/group/limit user.
+   */
   private async validateAddMemberOfCompanyZod(body: any) {
     const schema = addUserAsMemberOfCompanySchema.superRefine(async (data, ctx) => {
       if (data.email) {
@@ -1108,6 +1179,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Chuyển body update sang map column/value giống logic Laravel trước khi ghi bảng users.
+   */
   private async buildLaravelUpdateUserColumns(
     params: Record<string, any>,
     body: Record<string, any>,
@@ -1189,6 +1263,9 @@ export class UsersService {
     return updates;
   }
 
+  /**
+   * Validate và lưu file avatar vào thư mục img/user_avatar, trả về tên file đã lưu.
+   */
   private async storeUserAvatar(
     userId: number,
     avatar: { originalname?: string; buffer?: Buffer },
@@ -1217,6 +1294,9 @@ export class UsersService {
     return name;
   }
 
+  /**
+   * Tạo mới hoặc cập nhật user_config cho user theo các field hotdesk/transport/port.
+   */
   private async upsertUserConfig(
     userId: number,
     body: Record<string, any>,
@@ -1248,6 +1328,9 @@ export class UsersService {
     await this.insertUserConfigForCreatedUser(userId, body, currentUserId);
   }
 
+  /**
+   * Insert bản ghi user_config ban đầu cho user vừa được tạo.
+   */
   private async insertUserConfigForCreatedUser(
     userId: number,
     body: Record<string, any>,
@@ -1272,6 +1355,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Đồng bộ region/branch/department access scopes cho user vào bảng jnt_user_access_scopes.
+   */
   private async syncJntUserAccessScopes(
     userId: number,
     body: Record<string, any>,
@@ -1301,11 +1387,17 @@ export class UsersService {
     }
   }
 
+  /**
+   * Chuẩn hóa danh sách scope id từ mảng hoặc chuỗi phân tách bằng dấu phẩy.
+   */
   private normalizeScopeIds(value: unknown) {
     const ids = Array.isArray(value) ? value : String(value ?? "").split(",");
     return ids.filter((id) => !this.isPhpEmpty(id));
   }
 
+  /**
+   * Cập nhật danh sách extension của department sau khi user đổi hoặc thêm extension.
+   */
   private async updateDepartmentExtension(body: Record<string, any>) {
     if (this.isPhpEmpty(body.departmentId) || this.isPhpEmpty(body.extension)) {
       return;
@@ -1351,6 +1443,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Ghi lịch sử chi tiết cho thao tác update user, gồm old/new của các field thay đổi.
+   */
   private async insertUpdateUserHistory(
     params: Record<string, any>,
     oldUser: DbRow | undefined,
@@ -1398,6 +1493,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Ghi lịch sử tạo hoặc cập nhật user ở dạng text/data_change chung.
+   */
   private async insertUserHistory(
     action: "insert" | "update",
     oldUser: DbRow | undefined,
@@ -1428,6 +1526,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * So sánh hai snapshot user theo các cột mutable để tạo payload data_change.
+   */
   private diffUsers(oldUser?: DbRow, newUser?: DbRow) {
     const dataChange = {
       old: [] as Record<string, any>[],
@@ -1447,6 +1548,9 @@ export class UsersService {
     return dataChange;
   }
 
+  /**
+   * Sinh userCode kế tiếp cho loại user midesk dựa trên userCode 5 ký tự mới nhất.
+   */
   private async nextMideskUserCode() {
     const rows = await this.usersRepo.manager.query(
       `
@@ -1461,6 +1565,9 @@ export class UsersService {
     return rows[0]?.userCode ?? String(Date.now());
   }
 
+  /**
+   * Ký JWT theo payload tương thích Laravel JWTAuth, gồm claim user và thời hạn remember.
+   */
   private signUserToken(user: any, remember: boolean, request?: Request) {
     const issuedAt = this.unixNow();
     const ttlMinutes = Number(this.config.get<string>("JWT_TTL", "60"));
@@ -1490,6 +1597,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Loại bỏ các field nhạy cảm khỏi user object trước khi trả về client.
+   */
   private sanitizeUser<T extends Record<string, any> | undefined>(user: T): T {
     if (!user) {
       return user;
@@ -1501,6 +1611,9 @@ export class UsersService {
     return clone as T;
   }
 
+  /**
+   * Áp dụng bộ lọc động từ request vào TypeORM query builder của danh sách users.
+   */
   private applyUserFilters(
     filters: unknown,
     qb: SelectQueryBuilder<any>
@@ -1573,6 +1686,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Áp dụng sort động vào query builder, mặc định sắp xếp users.id giảm dần.
+   */
   private applyUserOrder(qb: SelectQueryBuilder<any>, sorts: unknown) {
     if (
       !sorts ||
@@ -1618,6 +1734,9 @@ export class UsersService {
     }
   }
 
+  /**
+   * Đóng gói dữ liệu phân trang theo format paginator của Laravel.
+   */
   private paginateLaravel(
     data: DbRow[],
     total: number,
@@ -1650,6 +1769,9 @@ export class UsersService {
     };
   }
 
+  /**
+   * Tạo mảng link phân trang Previous/Next và từng page theo format Laravel.
+   */
   private paginationLinks(
     path: string | null,
     currentPage: number,
@@ -1688,10 +1810,16 @@ export class UsersService {
     return links;
   }
 
+  /**
+   * Tạo URL phân trang cho một page cụ thể hoặc trả null khi không có path.
+   */
   private paginationUrl(path: string | null, page: number) {
     return path ? `${path}?page=${page}` : null;
   }
 
+  /**
+   * Dựng path request đầy đủ nhưng bỏ query string để dùng trong link phân trang.
+   */
   private requestPathWithoutQuery(request: Request) {
     const host = this.headerToString(
       request.headers["x-forwarded-host"] ?? request.headers.host,
@@ -1706,11 +1834,17 @@ export class UsersService {
     return `${protocol}://${host}${request.originalUrl.split("?")[0]}`;
   }
 
+  /**
+   * Chuẩn hóa page request thành số nguyên dương, mặc định là 1.
+   */
   private normalizePage(value: unknown) {
     const page = Number(value);
     return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   }
 
+  /**
+   * Chuẩn hóa recordsOnPage theo giới hạn Laravel, cho phép tối đa 500 bản ghi.
+   */
   private normalizeLaravelRecordsOnPage(value: unknown) {
     if (this.isPhpEmpty(value)) {
       return 10;
@@ -1731,6 +1865,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Mô phỏng PHP empty cho các giá trị mà logic Laravel xem là rỗng.
+   */
   private isPhpEmpty(value: unknown) {
     if (value === undefined || value === null || value === false) {
       return true;
@@ -1741,14 +1878,23 @@ export class UsersService {
     return Array.isArray(value) && value.length === 0;
   }
 
+  /**
+   * Kiểm tra null/rỗng kiểu loose dùng riêng khi lọc input update từ Laravel.
+   */
   private isLaravelNullLoose(value: unknown) {
     return value === undefined || value === null || value === "";
   }
 
+  /**
+   * Chuyển bcrypt hash tiền tố $2y$ của PHP sang $2b$ để thư viện Node có thể compare.
+   */
   private normalizeBcryptHash(hash: string) {
     return hash?.startsWith("$2y$") ? `$2b$${hash.slice(4)}` : hash;
   }
 
+  /**
+   * Lấy IP client từ x-forwarded-for hoặc request.ip và chuẩn hóa IPv4.
+   */
   private getClientIp(request: Request) {
     const forwarded = request.headers["x-forwarded-for"];
     let ip = Array.isArray(forwarded)
@@ -1762,6 +1908,9 @@ export class UsersService {
     return ip.slice(0, 15);
   }
 
+  /**
+   * Lấy JWT_SECRET từ config và ném lỗi 500 nếu chưa cấu hình.
+   */
   private jwtSecret() {
     const secret = this.config.get<string>("JWT_SECRET");
     if (!secret) {
@@ -1773,6 +1922,9 @@ export class UsersService {
     return secret;
   }
 
+  /**
+   * Ném lỗi tài khoản/mật khẩu không chính xác theo format Laravel.
+   */
   private throwInvalidAccount(): never {
     this.throwError(
       {
@@ -1784,6 +1936,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Ném lỗi tài khoản bị khóa hoặc chưa xác thực theo format Laravel.
+   */
   private throwLockedAccount(): never {
     this.throwError(
       {
@@ -1795,6 +1950,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Helper ném HttpException theo cấu trúc error/errors/code/message thống nhất.
+   */
   private throwError(
     errors: Record<string, any>,
     code: number,
@@ -1812,6 +1970,9 @@ export class UsersService {
     );
   }
 
+  /**
+   * Chuyển mảng row thành object keyed theo một field, bỏ qua key rỗng.
+   */
   private keyBy(rows: DbRow[], key: string) {
     return rows.reduce<Record<string, any>>((acc, row) => {
       if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
@@ -1821,26 +1982,41 @@ export class UsersService {
     }, {});
   }
 
+  /**
+   * Trả về Unix timestamp hiện tại theo giây.
+   */
   private unixNow() {
     return Math.floor(Date.now() / 1000);
   }
 
+  /**
+   * Trả về datetime hiện tại ở format SQL YYYY-MM-DD HH:mm:ss.
+   */
   private nowSql(date = new Date()) {
     return this.toSqlDateTime(date);
   }
 
+  /**
+   * Trả về mốc bắt đầu ngày hiện tại ở format SQL.
+   */
   private startOfTodaySql() {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
     return this.toSqlDateTime(date);
   }
 
+  /**
+   * Trả về mốc kết thúc ngày hiện tại ở format SQL.
+   */
   private endOfTodaySql() {
     const date = new Date();
     date.setHours(23, 59, 59, 999);
     return this.toSqlDateTime(date);
   }
 
+  /**
+   * Format Date thành chuỗi SQL datetime không kèm timezone.
+   */
   private toSqlDateTime(date: Date) {
     const pad = (value: number) => String(value).padStart(2, "0");
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
