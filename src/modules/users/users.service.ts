@@ -1288,34 +1288,50 @@ export class UsersService {
       }
     }
 
-    updates.set(
-      "firstName",
-      !this.isPhpEmpty(body.firstName) ? body.firstName : null,
-    );
-    updates.set("phone", !this.isPhpEmpty(body.phone) ? body.phone : "");
-    updates.set("mobile", !this.isPhpEmpty(body.mobile) ? body.mobile : "");
-    updates.set("address", !this.isPhpEmpty(body.address) ? body.address : "");
-    updates.set("note", !this.isPhpEmpty(body.note) ? body.note : "");
-    updates.set("otherId", !this.isPhpEmpty(body.otherId) ? body.otherId : null);
-    updates.set(
-      "otherEmail",
-      !this.isPhpEmpty(body.otherEmail) ? body.otherEmail : null,
-    );
-    updates.set(
-      "is_google2fa",
-      !this.isPhpEmpty(body.is_google2fa) ? body.is_google2fa : null,
-    );
+    if (this.hasOwn(body, "firstName")) {
+      updates.set(
+        "firstName",
+        !this.isPhpEmpty(body.firstName) ? body.firstName : "",
+      );
+    }
+    if (this.hasOwn(body, "phone")) {
+      updates.set("phone", !this.isPhpEmpty(body.phone) ? body.phone : "");
+    }
+    if (this.hasOwn(body, "mobile")) {
+      updates.set("mobile", !this.isPhpEmpty(body.mobile) ? body.mobile : "");
+    }
+    if (this.hasOwn(body, "address")) {
+      updates.set("address", !this.isPhpEmpty(body.address) ? body.address : "");
+    }
+    if (this.hasOwn(body, "note")) {
+      updates.set("note", !this.isPhpEmpty(body.note) ? body.note : "");
+    }
+    if (this.hasOwn(body, "otherId")) {
+      updates.set("otherId", !this.isPhpEmpty(body.otherId) ? body.otherId : null);
+    }
+    if (this.hasOwn(body, "otherEmail")) {
+      updates.set(
+        "otherEmail",
+        !this.isPhpEmpty(body.otherEmail) ? body.otherEmail : null,
+      );
+    }
+    if (this.hasOwn(body, "is_google2fa")) {
+      updates.set(
+        "is_google2fa",
+        !this.isPhpEmpty(body.is_google2fa) ? body.is_google2fa : null,
+      );
+    }
 
-    if (Object.prototype.hasOwnProperty.call(body, "queues")) {
+    if (this.hasOwn(body, "queues")) {
       updates.set("queues", this.isPhpEmpty(body.queues) ? null : body.queues);
     }
-    if (Object.prototype.hasOwnProperty.call(body, "extension")) {
+    if (this.hasOwn(body, "extension")) {
       updates.set(
         "extension",
         this.isPhpEmpty(body.extension) ? null : body.extension,
       );
     }
-    if (Object.prototype.hasOwnProperty.call(body, "extensions_view")) {
+    if (this.hasOwn(body, "extensions_view")) {
       updates.set(
         "extensions_view",
         this.isPhpEmpty(body.extensions_view) ? null : body.extensions_view,
@@ -1371,6 +1387,18 @@ export class UsersService {
     body: Record<string, any>,
     currentUserId?: number,
   ) {
+    if (!(await this.tableExists("user_config"))) {
+      return;
+    }
+
+    if (
+      !this.hasOwn(body, "is_hotdesk") &&
+      !this.hasOwn(body, "transports") &&
+      !this.hasOwn(body, "port")
+    ) {
+      return;
+    }
+
     const rows = await this.usersRepo.manager.query(
       "SELECT userid FROM user_config WHERE userid = ? LIMIT 1",
       [userId],
@@ -1435,19 +1463,23 @@ export class UsersService {
       return;
     }
 
-    const scopes: Record<string, unknown> = {
-      region: body.list_region ? body.list_region : [],
-      branch: body.list_branch ? body.list_branch : [],
-      department: body.list_department ? body.list_department : [],
+    const scopes: Record<string, { key: string; value: unknown }> = {
+      region: { key: "list_region", value: body.list_region },
+      branch: { key: "list_branch", value: body.list_branch },
+      department: { key: "list_department", value: body.list_department },
     };
 
-    for (const [type, rawIds] of Object.entries(scopes)) {
+    for (const [type, scope] of Object.entries(scopes)) {
+      if (!this.hasOwn(body, scope.key)) {
+        continue;
+      }
+
       await this.usersRepo.manager.query(
         "DELETE FROM jnt_user_access_scopes WHERE user_id = ? AND scope_type = ?",
         [userId, type],
       );
 
-      for (const scopeId of this.normalizeScopeIds(rawIds)) {
+      for (const scopeId of this.normalizeScopeIds(scope.value)) {
         await this.usersRepo.manager.query(
           "INSERT INTO jnt_user_access_scopes (user_id, scope_type, scope_id) VALUES (?, ?, ?)",
           [userId, type, scopeId],
@@ -1522,6 +1554,9 @@ export class UsersService {
     currentUser: DbRow | undefined,
   ) {
     if (!oldUser || !newUser || !currentUser) {
+      return;
+    }
+    if (!(await this.tableExists("data_history"))) {
       return;
     }
 
@@ -1945,6 +1980,13 @@ export class UsersService {
       return true;
     }
     return Array.isArray(value) && value.length === 0;
+  }
+
+  /**
+   * Kiem tra key co duoc gui trong request body hay khong.
+   */
+  private hasOwn(source: Record<string, any>, key: string) {
+    return Object.prototype.hasOwnProperty.call(source, key);
   }
 
   /**
