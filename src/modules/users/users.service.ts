@@ -31,6 +31,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { Request } from "express";
 import { Not, Brackets, SelectQueryBuilder, Between, In } from "typeorm";
+import { z } from "zod";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
 import { UserLogEntity } from "./entities/user-log.entity";
 import { updateUserSchema } from "./dto/update-user.dto";
@@ -141,6 +142,62 @@ const USER_FILTER_TYPES = new Set([
   "more_equal",
   "more_less",
 ]);
+
+const USER_AVATAR_EXTENSIONS = ["jpg", "jpeg", "png", "bmp", "gif", "svg", "JPG", "PNG"] as const;
+
+const USER_AVATAR_SCHEMA = z
+  .object({
+    originalname: z.string().optional(),
+    buffer: z.custom<Buffer>((value) => Buffer.isBuffer(value), {
+      message: "Không thể upload hình ảnh.",
+    }),
+  })
+  .superRefine((avatar, ctx) => {
+    const ext = extname(avatar.originalname ?? "").replace(".", "");
+    if (!USER_AVATAR_EXTENSIONS.includes(ext as (typeof USER_AVATAR_EXTENSIONS)[number])) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["avatar"],
+        message: "Chỉ cho phép hình ảnh jpeg, png, bmp, gif, hoặc svg.",
+      });
+    }
+  });
+
+const RECORDS_ON_PAGE_ERROR =
+  "Số mẫu tin trên mỗi trang phải lớn hơn 0 và nhỏ hơn bằng 500.";
+
+const LARAVEL_RECORDS_ON_PAGE_SCHEMA = z
+  .union([z.string(), z.number()])
+  .transform((value) => Number(value))
+  .refine((value) => Number.isFinite(value) && value > 0 && value <= 500, {
+    message: RECORDS_ON_PAGE_ERROR,
+  })
+  .transform((value) => Math.floor(value));
+
+const USER_FILTER_RULE_SCHEMA = z
+  .object({
+    column: z.string().refine((column) => USER_TABLE_COLUMNS.has(column), {
+      message: "Cột không tồn tại hoặc kiểu lọc không cho phép.",
+    }),
+    type: z.string().refine((type) => USER_FILTER_TYPES.has(type), {
+      message: "Cột không tồn tại hoặc kiểu lọc không cho phép.",
+    }),
+    keyword: z.unknown().optional(),
+  })
+  .passthrough();
+
+const requiredJwtClaim = z.unknown().refine((value) => value !== undefined);
+
+const JWT_REQUIRED_CLAIMS_SCHEMA = z
+  .object({
+    iss: requiredJwtClaim,
+    iat: requiredJwtClaim,
+    exp: requiredJwtClaim,
+    nbf: requiredJwtClaim,
+    sub: z.union([z.string(), z.number()]),
+    jti: requiredJwtClaim,
+  })
+  .passthrough();
 
 @Injectable()
 export class UsersService {
@@ -379,8 +436,7 @@ export class UsersService {
         secret,
         algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
       });
-      const requiredClaims = ["iss", "iat", "exp", "nbf", "sub", "jti"];
-      if (requiredClaims.some((claim) => payload[claim] === undefined)) {
+      if (!JWT_REQUIRED_CLAIMS_SCHEMA.safeParse(payload).success) {
         return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
       }
       // Lấy user id từ payload
@@ -1148,6 +1204,67 @@ export class UsersService {
   }
 
   /**
+   * Parse du lieu bang Zod va nem loi theo format Laravel neu khong hop le.
+   */
+  private parseLaravelZod<T>(
+    schema: z.ZodType<T>,
+    value: unknown,
+    httpStatus: number,
+    fieldOverride?: string,
+  ) {
+    const result = schema.safeParse(value);
+    if (result.success) {
+      return result.data;
+    }
+
+    this.throwZodValidation(result.error.issues, httpStatus, fieldOverride);
+  }
+
+  /**
+   * Parse async bang Zod cho cac validate can query database trong superRefine().
+   */
+  private async parseLaravelZodAsync<T>(
+    schema: z.ZodType<T>,
+    value: unknown,
+    httpStatus: number,
+    fieldOverride?: string,
+  ) {
+    const result = await schema.safeParseAsync(value);
+    if (result.success) {
+      return result.data;
+    }
+
+    this.throwZodValidation(result.error.issues, httpStatus, fieldOverride);
+  }
+
+  /**
+   * Chuyen danh sach loi Zod ve cau truc error.errors dang tuong thich Laravel.
+   */
+  private throwZodValidation(
+    issues: ReadonlyArray<{
+      path: ReadonlyArray<PropertyKey>;
+      message: string;
+    }>,
+    httpStatus: number,
+    fieldOverride?: string,
+  ): never {
+    const errors: Record<string, string> = {};
+    for (const issue of issues) {
+      const field = fieldOverride ?? (issue.path.map(String).join(".") || "value");
+      errors[field] = issue.message;
+    }
+
+    throw new HttpException(
+      {
+        code: 406,
+        message: "Invalid parameters",
+        error: { errors },
+      },
+      httpStatus,
+    );
+  }
+
+  /**
    * Validate dữ liệu update user bằng Zod và kiểm tra thêm email/group/limit user.
    */
   private async validateUpdateUserZod(body: any, userId: number) {
@@ -1192,21 +1309,7 @@ export class UsersService {
       }
     });
 
-    const result = await schema.safeParseAsync(body);
-    if (!result.success) {
-      const errors: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        errors[issue.path.join(".")] = issue.message;
-      }
-      throw new HttpException(
-        {
-          code: 406,
-          message: "Invalid parameters",
-          error: { errors },
-        },
-        HttpStatus.NOT_ACCEPTABLE,
-      );
-    }
+    await this.parseLaravelZodAsync(schema, body, HttpStatus.NOT_ACCEPTABLE);
   }
 
   /**
@@ -1254,21 +1357,7 @@ export class UsersService {
       }
     });
 
-    const result = await schema.safeParseAsync(body);
-    if (!result.success) {
-      const errors: Record<string, string> = {};
-      for (const issue of result.error.issues) {
-        errors[issue.path.join(".")] = issue.message;
-      }
-      throw new HttpException(
-        {
-          code: 406,
-          message: "Invalid parameters",
-          error: { errors },
-        },
-        HttpStatus.OK,
-      );
-    }
+    await this.parseLaravelZodAsync(schema, body, HttpStatus.OK);
   }
 
   /**
@@ -1378,27 +1467,17 @@ export class UsersService {
     userId: number,
     avatar: { originalname?: string; buffer?: Buffer },
   ) {
-    const ext = extname(avatar.originalname ?? "").replace(".", "");
-    if (!["jpg", "jpeg", "png", "bmp", "gif", "svg", "JPG", "PNG"].includes(ext)) {
-      this.throwError(
-        { avatar: "Chỉ cho phép hình ảnh jpeg, png, bmp, gif, hoặc svg." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
-    }
-
-    if (!avatar.buffer) {
-      this.throwError(
-        { avatar: "Không thể upload hình ảnh." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
-    }
-
+    const parsedAvatar = this.parseLaravelZod(
+      USER_AVATAR_SCHEMA,
+      avatar,
+      HttpStatus.NOT_ACCEPTABLE,
+      "avatar",
+    );
+    const ext = extname(parsedAvatar.originalname ?? "").replace(".", "");
     const name = `${userId}-${this.unixNow()}.${ext}`;
     const dir = join(process.cwd(), "img", "user_avatar");
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, name), avatar.buffer);
+    await writeFile(join(dir, name), parsedAvatar.buffer);
     return name;
   }
 
@@ -1758,16 +1837,14 @@ export class UsersService {
     for (const [column, rawFilter] of Object.entries(
       filters as Record<string, any>,
     )) {
-      const type = String(rawFilter?.type ?? "");
-      if (!USER_TABLE_COLUMNS.has(column) || !USER_FILTER_TYPES.has(type)) {
-        this.throwError(
-          { filter: "Cột không tồn tại hoặc kiểu lọc không cho phép." },
-          HttpStatus.NOT_ACCEPTABLE,
-          "Invalid parameters",
-        );
-      }
-
-      const keyword = rawFilter?.keyword;
+      const filter = this.parseLaravelZod(
+        USER_FILTER_RULE_SCHEMA,
+        { column, ...(rawFilter ?? {}) },
+        HttpStatus.NOT_ACCEPTABLE,
+        "filter",
+      );
+      const type = filter.type;
+      const keyword = filter.keyword;
       if (this.isPhpEmpty(keyword)) {
         continue;
       }
@@ -1977,18 +2054,11 @@ export class UsersService {
       return 10;
     }
 
-    const size = Number(value);
-    if (Number.isFinite(size) && size > 0 && size <= 500) {
-      return Math.floor(size);
-    }
-
-    this.throwError(
-      {
-        records_on_pages:
-          "Số mẫu tin trên mỗi trang phải lớn hơn 0 và nhỏ hơn bằng 500.",
-      },
+    return this.parseLaravelZod(
+      LARAVEL_RECORDS_ON_PAGE_SCHEMA,
+      value,
       HttpStatus.NOT_ACCEPTABLE,
-      "Invalid parameters",
+      "records_on_pages",
     );
   }
 
