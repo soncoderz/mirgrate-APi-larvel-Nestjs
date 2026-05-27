@@ -33,6 +33,12 @@ Snapshot ngay 2026-05-26:
   chua co DDL table nay nen service guard de tranh crash tren DB imported hien tai.
 - `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), lay custom claims va verify lai JWT token truoc khi tra ve, kiem tra group locked, va superadmin getQueueAndAgents.
 - `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan validate (address, note, status), thay doi default userCode sang `unixNow()`, dong bo sync `JnTUserAccessScopes` cho regions/branches/departments, insert `qrcode_mifone` neu co `emailqr`, ho tro upload avatar vao file system va update columns, sync `departments.extensions`, dong thoi comment `user_config` giong nhu Laravel code.
+- `POST /api/v1/addUserAsCompany` da cap nhat theo Laravel: validate `Helper::checkParams`
+  style, duplicate `groupName` tra 406, doc `storage/group_setting/file.txt`, tao group
+  `groupName-setting`, `limitUser = 1`, `status = publish`, tao user role default `user`,
+  avatar chi chap nhan `jpg/png/gif`, transaction insert `user_module` va 3 demo customers,
+  success HTTP 201, validation body HTTP 200; transaction set `sql_mode=''` de match
+  Laravel `strict => false`.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
@@ -65,6 +71,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | CODED_PENDING_POSTMAN | `POST /api/v1/resetPassword` | `UsersController@resetPassword` | Password verify + update |
 | CODED_PENDING_POSTMAN | `POST /api/v1/forgotPassword` | `UsersController@forgotPassword` | Email/reset token behavior |
 | CODED_PENDING_POSTMAN | `POST /api/v1/changePasswordForgot` | `UsersController@changePasswordForgot` | Reset password by token |
+| CODED_PENDING_POSTMAN | `POST /api/v1/addUserAsCompany` | `UsersController@addUserAsCompany` | Create group/user/modules/demo customers per Laravel |
 | CODED_PENDING_POSTMAN | `POST /api/v1/users` | `UsersController@getUsers` | Match Laravel select/join/filter/sort/paginator shape |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByRole` | `UsersController@getUsersByRole` | Role filter |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByExt` | `UsersController@getUserInfoByExtension` | Also used by connector |

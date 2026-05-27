@@ -34,6 +34,10 @@ Snapshot ngay 2026-05-26:
   `departments.extensions`, va guarded `jnt_user_access_scopes` sync.
 - `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), verify lai token sau khi sign, check group lock/existence, va getQueueAndAgents cho superadmin.
 - `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan logic validate (address, note, status), default userCode unix timestamp (`unixNow()`), sync `JnTUserAccessScopes` cho scope types, insert `qrcode_mifone`, upload avatar va UPDATE user avatar field, sync `departments.extensions`, va giu `user_config` dang comment giong Laravel.
+- `POST /api/v1/addUserAsCompany` da cap nhat theo Laravel flow: group setting file,
+  generated group name, group/user transaction, `user_module`, demo customers, avatar
+  `jpg/png/gif`, success HTTP 201, validation body HTTP 200, va transaction
+  `sql_mode=''` de match Laravel `strict => false`.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
@@ -163,7 +167,7 @@ Status values:
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/loginExternal` | `UsersController@loginExternal` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/logout` | `UsersController@logout`; invalidates Bearer token |
 | BLOCKED | M1 | POST | `/api/v1/logoutv2` | `UsersController@logoutv2`; verify source/sample |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsCompany` | `UsersController@addUserAsCompany` |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsCompany` | `UsersController@addUserAsCompany`; group/user/modules/demo customers flow ported |
 | DEFERRED | M8 | POST | `/api/v1/addUserByExcel` | `UsersController@addUserByExcel` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/resetPassword` | `UsersController@resetPassword` |
 

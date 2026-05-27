@@ -24,8 +24,18 @@
  * @Controller('v1') → prefix: /api/v1/...
  */
 
-import { Body, Controller, HttpCode, Post, Req } from "@nestjs/common";
-import { Request } from "express";
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { Request, Response } from "express";
 import { UsersService } from "../users/users.service";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
@@ -195,10 +205,19 @@ export class AuthController {
    * @returns { success: { id: number } } - ID của user vừa tạo
    *
    * Tương đương: UsersController@addUserAsCompany trong Laravel
-   */
+  */
   @Post("addUserAsCompany")
-  addUserAsCompany(@Body() body: Record<string, unknown>) {
-    return this.users.addUserAsCompany(body);
+  @UseInterceptors(FileInterceptor("avatar"))
+  addUserAsCompany(
+    @Body() body: Record<string, unknown>,
+    @UploadedFile() avatar: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = this.users.addUserAsCompany(body, avatar);
+    return Promise.resolve(result).then((data) => {
+      response.status(data && "success" in data ? 201 : 200);
+      return data;
+    });
   }
 
   /**

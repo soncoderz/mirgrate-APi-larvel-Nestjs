@@ -143,7 +143,7 @@ export class UserTypesService {
     );
     if (duplicated[0]) {
       this.throwError(
-        { name_exist: "Ten phan quyen da ton tai." },
+        { name_exist: "Tên phân quyền đã tồn tại." },
         HttpStatus.NOT_ACCEPTABLE,
         "Invalid parameters",
       );
@@ -218,7 +218,7 @@ export class UserTypesService {
     );
     if (duplicated[0]) {
       this.throwError(
-        { name_exist: "Ten cua phan quyen da ton tai." },
+        { name_exist: "Tên phân quyền đã tồn tại." },
         HttpStatus.NOT_ACCEPTABLE,
         "Invalid parameters",
       );

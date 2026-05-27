@@ -58,7 +58,7 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 import { createHash, randomBytes } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { Request } from "express";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
@@ -691,13 +691,16 @@ export class UsersService {
     };
   }
 
-  async addUserAsCompany(body: Record<string, any>) {
-    this.validateCreateCompany(body);
-    await this.assertEmailIsAvailable(String(body.email));
+  async addUserAsCompany(
+    body: Record<string, any>,
+    avatar?: { originalname?: string; buffer?: Buffer },
+  ) {
+    const validationError = await this.validateCreateCompany(body);
+    if (validationError) {
+      return validationError;
+    }
 
     const groupNameInput = String(body.groupName).trim();
-    const setting =
-      String(body.groupSetting ?? "groupdefault").trim() || "groupdefault";
     const groupExists = await this.database.query<DbRow[]>(
       "main",
       "SELECT id FROM `groups` WHERE groupName = ? LIMIT 1",
@@ -706,11 +709,15 @@ export class UsersService {
 
     if (groupExists[0]) {
       this.throwError(
-        { groupName_exist: "Ten group da ton tai." },
+        { groupName_exist: "Tên group đã tồn tại." },
         HttpStatus.NOT_ACCEPTABLE,
         "Invalid parameters",
       );
     }
+
+    const setting =
+      String(body.groupSetting ?? "groupdefault").trim() || "groupdefault";
+    const listModules = await this.readCompanyGroupSettingModules(setting);
 
     let newGroupName = `${groupNameInput}-${setting}`;
     const sameGeneratedGroup = await this.database.query<DbRow[]>(
@@ -724,96 +731,74 @@ export class UsersService {
 
     const connection = await this.database.pool("main").getConnection();
     try {
+      await connection.query("SET SESSION sql_mode = ''");
       await connection.beginTransaction();
-      const now = this.nowSql();
 
       const [groupResult] = await connection.execute<ResultSetHeader>(
         `
-          INSERT INTO \`groups\` (groupName, limitUser, status, created_at, created_by, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO \`groups\` (groupName, limitUser, status)
+          VALUES (?, ?, ?)
         `,
-        [newGroupName, 1, "active", now, null, null],
+        [newGroupName, 1, "publish"],
       );
 
       const groupId = groupResult.insertId;
+      const avatarName = avatar
+        ? await this.storeCompanyAvatar(avatar)
+        : null;
       const [userResult] = await connection.execute<ResultSetHeader>(
         `
           INSERT INTO users (
             firstName,lastName,userCode,status,mobile,phone,email,password,address,note,
-            role,groupId,loginType,typeId,created_at,created_by
+            role,groupId,loginType,typeId,avatar,created_by
           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `,
         [
-          body.firstName ?? "",
-          body.lastName ?? "",
-          body.userCode ?? this.unixNow(),
-          body.status ?? "pending",
-          body.mobile ?? "",
-          body.phone ?? "",
-          body.email,
-          await bcrypt.hash(String(body.password), 12),
-          body.address ?? "",
-          body.note ?? "",
-          body.role ?? "agent",
+          this.isPhpEmpty(body.firstName) ? "" : body.firstName,
+          this.isPhpEmpty(body.lastName) ? "" : body.lastName,
+          this.isPhpEmpty(body.userCode) ? this.unixNow() : body.userCode,
+          this.isPhpEmpty(body.status) ? "pending" : body.status,
+          this.isPhpEmpty(body.mobile) ? "" : body.mobile,
+          this.isPhpEmpty(body.phone) ? "" : body.phone,
+          this.isPhpEmpty(body.email) ? "" : body.email,
+          this.isPhpEmpty(body.password)
+            ? ""
+            : await bcrypt.hash(String(body.password), 12),
+          this.isPhpEmpty(body.address) ? "" : body.address,
+          this.isPhpEmpty(body.note) ? "" : body.note,
+          this.isPhpEmpty(body.role) ? "user" : body.role,
           groupId,
           "website",
-          body.typeId,
-          now,
-          null,
+          this.isPhpEmpty(body.typeId) ? "" : body.typeId,
+          avatarName,
+          0,
         ],
       );
 
-      const defaultModules = await connection.query<DbRow[]>(
-        `
-          SELECT module, action, \`order\`, sub_module, status
-          FROM user_module
-          WHERE groupId IS NULL AND status = 'publish'
-        `,
-      );
-      for (const moduleRow of defaultModules[0]) {
+      for (const moduleRow of listModules) {
         await connection.execute<ResultSetHeader>(
           `
-            INSERT INTO user_module
-              (groupId, module, action, \`order\`, sub_module, status, created_at, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_module (module, action, groupId)
+            VALUES (?, ?, ?)
           `,
           [
-            groupId,
             moduleRow.module,
-            moduleRow.action,
-            moduleRow.order ?? 0,
-            moduleRow.sub_module ?? "",
-            moduleRow.status ?? "publish",
-            now,
-            null,
+            JSON.stringify(moduleRow.list_module ?? []),
+            groupId,
           ],
         );
       }
 
       const [templateCustomers] = await connection.query<DbRow[]>(
-        "SELECT firstName,lastName,phone,email,address,note,status FROM customers WHERE id = 1 LIMIT 1",
+        "SELECT * FROM customers WHERE id = 1 LIMIT 1",
       );
       if (templateCustomers[0]) {
         for (let i = 0; i < 3; i += 1) {
-          const rand = this.unixNow() + i;
-          await connection.execute<ResultSetHeader>(
-            `
-              INSERT INTO customers
-                (customerCode, firstName, lastName, phone, email, address, note, groupId, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [
-              `KH${rand}`,
-              `KH-${rand}`,
-              templateCustomers[0].lastName ?? "demo",
-              templateCustomers[0].phone ?? null,
-              templateCustomers[0].email ?? null,
-              templateCustomers[0].address ?? null,
-              templateCustomers[0].note ?? null,
-              groupId,
-              templateCustomers[0].status ?? "publish",
-              now,
-            ],
+          await this.replicateCompanyDemoCustomer(
+            connection,
+            templateCustomers[0],
+            groupId,
+            i,
           );
         }
       }
@@ -1797,7 +1782,7 @@ export class UsersService {
     );
   }
 
-  private validateCreateCompany(body: Record<string, any>) {
+  private async validateCreateCompany(body: Record<string, any>) {
     const errors: Record<string, string> = {};
 
     if (!this.isBetween(body.firstName, 1, 50)) {
@@ -1811,6 +1796,8 @@ export class UsersService {
       !this.isEmail(String(body.email ?? ""))
     ) {
       errors.email = "Email khong hop le.";
+    } else if (await this.emailExistsForOtherUser(String(body.email), 0)) {
+      errors.email = "Đã tồn tại";
     }
     if (!this.isBetween(body.password, 6, 32)) {
       errors.password = "Xin nhap tu 6 den 32 ky tu.";
@@ -1820,6 +1807,12 @@ export class UsersService {
     }
     if (!this.isBetween(body.groupName, 6, 255)) {
       errors.groupName = "Xin nhap tu 6 den 255 ky tu.";
+    }
+    if (body.address !== undefined && String(body.address).length > 255) {
+      errors.address = "Xin nhap khong qua 255 ky tu.";
+    }
+    if (body.note !== undefined && String(body.note).length > 255) {
+      errors.note = "Xin nhap khong qua 255 ky tu.";
     }
     if (
       body.status &&
@@ -1833,16 +1826,113 @@ export class UsersService {
     ) {
       errors.role = "Role khong hop le.";
     }
-    if (!Number.isFinite(Number(body.typeId))) {
+    if (this.isPhpEmpty(body.typeId) || !this.isNumeric(body.typeId)) {
       errors.typeId = "Xin nhap chu so.";
     }
 
-    if (Object.keys(errors).length) {
-      throw new HttpException(
-        { code: 406, message: "Invalid parameters", error: { errors } },
+    if (Object.keys(errors).length === 0) {
+      return undefined;
+    }
+
+    return {
+      code: 406,
+      message: "Invalid parameters",
+      error: { errors },
+    };
+  }
+
+  private async readCompanyGroupSettingModules(setting: string) {
+    try {
+      const contents = await readFile(
+        join(process.cwd(), "storage", "group_setting", "file.txt"),
+        "utf8",
+      );
+      const lines = contents.split(/\r?\n/).filter(Boolean);
+      let listModules: any[] = [];
+      let flag = true;
+
+      for (const line of lines) {
+        const temp = line.split("-");
+        if (temp[0] === setting) {
+          const parsed = JSON.parse(temp[temp.length - 1] ?? "[]");
+          listModules = Array.isArray(parsed) ? parsed : [];
+          flag = false;
+          break;
+        }
+      }
+
+      if (!flag && lines[0]) {
+        const temp = lines[0].split("-");
+        const parsed = JSON.parse(temp[1] ?? "[]");
+        listModules = Array.isArray(parsed) ? parsed : [];
+      }
+
+      return listModules;
+    } catch {
+      return [];
+    }
+  }
+
+  private async storeCompanyAvatar(avatar: {
+    originalname?: string;
+    buffer?: Buffer;
+  }) {
+    const ext = extname(avatar.originalname ?? "").replace(".", "");
+    if (!["jpg", "png", "gif"].includes(ext)) {
+      this.throwError(
+        { image_error: "File ảnh không hợp lệ." },
         HttpStatus.NOT_ACCEPTABLE,
+        "Invalid parameters",
       );
     }
+
+    if (!avatar.buffer) {
+      this.throwError(
+        { image_error: "File ảnh không hợp lệ." },
+        HttpStatus.NOT_ACCEPTABLE,
+        "Invalid parameters",
+      );
+    }
+
+    const name = `${this.formatCompanyAvatarDate()}-${avatar.originalname ?? "avatar"}`;
+    const dir = join(process.cwd(), "img", "user_avatar");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, name), avatar.buffer);
+    return name;
+  }
+
+  private formatCompanyAvatarDate(date = new Date()) {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const hour12 = date.getHours() % 12 || 12;
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(hour12)}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+  }
+
+  private async replicateCompanyDemoCustomer(
+    connection: any,
+    template: DbRow,
+    groupId: number,
+    index: number,
+  ) {
+    const customer = { ...template };
+    delete customer.id;
+    const rand = this.unixNow() + index;
+
+    customer.customerCode = `KH${rand}`;
+    customer.firstName = `KH-${rand}`;
+    customer.lastName = "demo";
+    customer.groupId = groupId;
+    customer.created_at = this.nowSql();
+    customer.updated_at = this.nowSql();
+
+    const columns = Object.keys(customer);
+    const placeholders = columns.map(() => "?").join(",");
+    await connection.execute(
+      `
+        INSERT INTO customers (${columns.map((column) => `\`${column}\``).join(",")})
+        VALUES (${placeholders})
+      `,
+      columns.map((column) => customer[column]),
+    );
   }
 
   private async findUserByEmail(email: string) {
