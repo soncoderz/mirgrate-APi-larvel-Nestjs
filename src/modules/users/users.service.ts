@@ -162,6 +162,7 @@ export class UsersService {
     const password = String(body.password ?? "");
     const clientIp = this.getClientIp(request);
 
+    // Kiểm tra email hoặc password có bị rỗng không
     if (!email || !password) {
       await this.insertUserLog({
         username: email,
@@ -173,7 +174,7 @@ export class UsersService {
       await this.handleLoginFail(email, clientIp);
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
-
+    //Kiểm tra user có tồn tại không
     const user = await this.findUserByEmail(email);
     if (!user) {
       await this.insertUserLog({
@@ -187,6 +188,7 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
+    // Kiểm tra password có đúng không
     const passwordMatches = await bcrypt.compare(
       password,
       this.normalizeBcryptHash(user.password),
@@ -202,7 +204,7 @@ export class UsersService {
       await this.handleInvalidPassword(email);
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
-
+    // Kiểm tra user có bị khóa không
     if (user.status !== "active") {
       await this.insertUserLog({
         username: email,
@@ -212,17 +214,18 @@ export class UsersService {
       });
       this.throwLockedAccount();
     }
-
+    // Tạo token
     const token = await this.signUserToken(
       user,
       Boolean(body.remember_token),
       request,
     );
-
+    // Tạo token
     const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
       secret: this.jwtSecret(),
       algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
     });
+    // Lấy user từ token
     const curUser = await this.findUserById(Number(payload.sub ?? payload.id), false);
     if (!curUser) {
       throw new HttpException(
@@ -230,12 +233,12 @@ export class UsersService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-
+    // Kiểm tra group có tồn tại không
     const group = curUser.groupId ? await this.getGroupForLogin(curUser.groupId) : null;
     if (!group || group.status === "lock") {
       this.throwLockedAccount();
     }
-
+    // Lưu log
     const userLog = await this.insertUserLog({
       username: email,
       password,
@@ -244,12 +247,12 @@ export class UsersService {
       status: "sign-in",
       sign_in_time: this.unixNow(),
     });
-
+    // Cập nhật lastLogin và isOnline
     await this.usersRepo.user.update(curUser.id, {
       lastLogin: this.nowSql(),
       isOnline: 1,
     });
-
+    // Xử lý dữ liệu trả về
     const responseUser = this.sanitizeUser({ ...user });
     const [privileges] = await this.processPrivileges(curUser);
     const [queueConfig, agentsView] = await this.getQueueAndAgents(
@@ -257,18 +260,18 @@ export class UsersService {
       responseUser,
     );
     const groupHotline = curUser.groupId ? await this.getGroupHotline(curUser.groupId) : [];
-
+    // Gộp queue_config từ group_hotline vào queueConfig
     for (const value of groupHotline) {
       if (value.queue_config && this.isJson(value.queue_config)) {
         this.assignMissing(queueConfig, JSON.parse(value.queue_config));
       }
     }
-
+    // Thêm socket_url và recording_url vào group
     if (group) {
       group.socket_url = this.config.get<string>("SOCKET_URL") ?? null;
       group.recording_url = this.config.get<string>("RECORDING_URL") ?? null;
     }
-
+    // Trả về dữ liệu
     return {
       success: {
         token,
@@ -287,6 +290,7 @@ export class UsersService {
    * Xử lý đăng xuất: lấy bearer token, cập nhật user_log, xóa remember_token và đưa token vào blacklist.
    */
   async logout(body: Record<string, any>, request: Request) {
+    // Lấy bearer token từ header authorization
     const token = this.extractBearerToken(request.headers.authorization);
     if (!token) {
       throw new HttpException(
@@ -294,7 +298,7 @@ export class UsersService {
         HttpStatus.BAD_REQUEST,
       );
     }
-
+    // Lấy payload từ token
     let payload: AuthPayload | undefined;
     try {
       payload = await this.jwt.verifyAsync<AuthPayload>(token, {
@@ -306,14 +310,15 @@ export class UsersService {
         message: "Không thể đăng xuất, token có thể đã hết hạn",
       };
     }
-
+    // Lấy log id từ body
     const logId = Number(body.id);
     let log: UserLogEntity | null = null;
     if (Number.isFinite(logId) && logId > 0) {
       log = await this.findUserLogById(logId);
     }
-
+    // Lấy user id từ payload
     const userId = Number(payload.sub ?? payload.id);
+    // Lấy user từ user id
     const user =
       Number.isFinite(userId) && userId > 0
         ? await this.usersRepo.user.findOne({
@@ -321,19 +326,22 @@ export class UsersService {
             where: { id: userId },
           })
         : null;
-
+    // Kiểm tra log có tồn tại không
     if (log) {
+      // Kiểm tra user có tồn tại không
       if (user) {
+        // Xóa remember_token nếu có
         if (user.remember_token) {
           await this.invalidateStoredToken(String(user.remember_token));
         }
-
+        // Xóa remember_token
         await this.usersRepo.user.update(user.id, {
           remember_token: null,
         });
       }
-
+      // Kiểm tra log status có phải là sign-in không
       if (log.status === "sign-in") {
+        // Cập nhật log status thành sign-out
         await this.usersRepo.log.update(logId, {
           status: "sign-out",
           sign_out_time: this.unixNow(),
@@ -341,9 +349,9 @@ export class UsersService {
         });
       }
     }
-
+    // Xóa token khỏi blacklist
     this.invalidateToken(token, (payload as { exp?: number }).exp);
-
+    // Trả về dữ liệu
     return { message: "Logout success", code: 200 };
   }
 
@@ -351,17 +359,20 @@ export class UsersService {
    * Kiểm tra JWT giống Laravel UsersController@me: parseToken()->authenticate().
    */
   async checkToken(request: Request) {
+    // Lấy bearer token từ header authorization
     const token = this.extractRequestToken(request);
+    // Kiểm tra token có tồn tại không
     if (!token) {
       return { message: "Token is missing", code: HttpStatus.UNAUTHORIZED };
     }
-
+    // Kiểm tra token có hợp lệ không
     if (this.blacklist.isInvalidated(token)) {
       return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
     }
-
+    // Lấy JWT secret
     const secret = this.jwtSecret();
     try {
+      // Lấy payload từ token
       const payload = await this.jwt.verifyAsync<
         AuthPayload & Record<string, unknown>
       >(token, {
@@ -372,23 +383,26 @@ export class UsersService {
       if (requiredClaims.some((claim) => payload[claim] === undefined)) {
         return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
       }
-
+      // Lấy user id từ payload
       const userId = Number(payload.sub ?? payload.id);
+      // Lấy user từ user id
       const user =
         Number.isFinite(userId) && userId > 0
           ? await this.findUserById(userId, false, true)
           : undefined;
+      // Kiểm tra user có tồn tại không
       if (!user) {
         return { message: "User not found", code: HttpStatus.UNAUTHORIZED };
       }
-
+      // Trả về dữ liệu
       return { message: "Success", code: HttpStatus.OK };
     } catch (error) {
       const errorName = error instanceof Error ? error.name : "";
+      // Kiểm tra token có bị expired không
       if (errorName === "TokenExpiredError") {
         return { message: "Token has expired", code: HttpStatus.UNAUTHORIZED };
       }
-
+      // Trả về dữ liệu
       return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
     }
   }
@@ -397,11 +411,13 @@ export class UsersService {
    * Kiểm tra payload JWT hiện tại và trả về trạng thái đơn giản cho endpoint /me.
    */
   async me(payload: AuthPayload | undefined) {
+    // Lấy user hiện tại
     const user = await this.getCurrentUser(payload);
+    // Kiểm tra user có tồn tại không
     if (!user) {
       return { message: "User not found", code: 401 };
     }
-
+    // Trả về dữ liệu
     return { message: "Success", code: 200 };
   }
 
@@ -413,14 +429,16 @@ export class UsersService {
     payload: AuthPayload | undefined,
     request?: Request,
   ) {
+    // Lấy user hiện tại
     const currentUser = await this.getCurrentUser(payload);
+    // Kiểm tra user có tồn tại không
     if (!currentUser) {
       throw new HttpException(
         { success: false, message: "Unauthorized" },
         HttpStatus.UNAUTHORIZED,
       );
     }
-
+    // Tạo query builder
     const qb = this.usersRepo.user.createQueryBuilder("users")
       .leftJoin("departments", "departments", "departments.id = users.departmentId")
       .leftJoin("user_types", "user_types", "user_types.id = users.typeId")
@@ -429,8 +447,9 @@ export class UsersService {
       .leftJoin("user_config", "user_config", "user_config.userid = users.id");
 
     qb.where("users.status <> :statusTrash", { statusTrash: "trash" });
-
+    // Kiểm tra role của user hiện tại và filter theo group_id
     if (currentUser?.role !== "superadmin") {
+      // Kiểm tra group_id có tồn tại không
       if (!this.isPhpEmpty(body.groupId)) {
         qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
       } else if (Number(currentUser?.groupId) === 1) {
@@ -441,19 +460,19 @@ export class UsersService {
     } else if (!this.isPhpEmpty(body.groupId)) {
       qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
     }
-
+    // Kiểm tra departmentId có tồn tại không
     if (!this.isPhpEmpty(body.departmentId)) {
       qb.andWhere("users.departmentId = :departmentId", { departmentId: body.departmentId });
     }
-
+    // Kiểm tra typeId có tồn tại không
     if (!this.isPhpEmpty(body.typeId)) {
       qb.andWhere("users.typeId = :typeId", { typeId: body.typeId });
     }
-
+    // Kiểm tra roleId có tồn tại không
     if (!this.isPhpEmpty(body.roleId)) {
       qb.andWhere("users.role = :roleId", { roleId: body.roleId });
     }
-
+    // Kiểm tra search có tồn tại không
     if (!this.isPhpEmpty(body.search) && !Array.isArray(body.search)) {
       const keyword = `%${String(body.search)}%`;
       qb.andWhere(new Brackets(qbSub => {
@@ -465,15 +484,15 @@ export class UsersService {
           .orWhere("users.userCode = :searchVal", { searchVal: String(body.search) });
       }));
     }
-
+      // Apply filters
     this.applyUserFilters(body.filters, qb);
 
     const total = await qb.getCount();
-
+    // Tính toán phân trang
     const perPage = this.normalizeLaravelRecordsOnPage(body.recordsOnPage);
     const currentPage = this.normalizePage(body.page ?? 1);
     const offset = (currentPage - 1) * perPage;
-
+    // Select các trường cần thiết
     qb.select("users.*")
       .addSelect("departments.name", "departmentName")
       .addSelect("user_types.name", "typeName")
@@ -486,12 +505,13 @@ export class UsersService {
       .addSelect("IF(user_config.port IS NOT NULL, user_config.port, NULL)", "port");
 
     qb.limit(perPage).offset(offset);
-
+    // Apply order
     this.applyUserOrder(qb, body.sorts);
-
+    
     const data = await qb.getRawMany();
-
+    // Sanitize user data
     const sanitizedData = data.map((user) => this.sanitizeUser(user));
+    // Return paginated data
     return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
   }
 
@@ -518,13 +538,13 @@ export class UsersService {
     body: Record<string, any>,
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
-  ) {
+  ) { 
     const userId = Number(body.id);
     const params = this.filteredUpdateUserParams(body);
     
-    // Call Zod validation (throws HttpException 406 on failure)
+    // Validate body
     await this.validateUpdateUserZod(params, userId);
-
+    //
     const user = await this.findRawUserById(userId, true);
     if (!user) {
       this.throwError(
@@ -533,7 +553,7 @@ export class UsersService {
         "Invalid parameters",
       );
     }
-
+    //lấy user hiện tại
     const currentUser = await this.getCurrentUser(payload);
     const updates = await this.buildLaravelUpdateUserColumns(
       params,
@@ -542,22 +562,25 @@ export class UsersService {
       avatar,
       currentUser?.id,
     );
-
+    // Tạo update object
     const updateObj: Record<string, any> = {};
     for (const [key, value] of updates.entries()) {
       updateObj[key] = value;
     }
     await this.usersRepo.user.update(userId, updateObj);
-
+    // Đồng bộ scope
     await this.syncJntUserAccessScopes(userId, body);
+    // Tạo/update config
     await this.upsertUserConfig(userId, body, currentUser?.id);
-
+    // Lấy user đã update
     const updatedUserRaw = await this.findRawUserById(userId, true);
+    // Insert lịch sử thay đổi
     await this.insertUpdateUserHistory(params, user, updatedUserRaw, currentUser);
+    // Update department extension
     await this.updateDepartmentExtension(body);
-
+    // Lấy user đã update
     const updatedUser = await this.findUserById(userId, false, true);
-
+    // Return user đã update
     return {
       success: true,
       user: this.sanitizeUser(updatedUser),
@@ -572,16 +595,17 @@ export class UsersService {
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
   ) {
-    // Call Zod validation (throws HttpException 406 wrapped in HttpStatus.OK on failure)
+    // Validate body
     await this.validateAddMemberOfCompanyZod(body);
-
+    //lấy user hiện tại
     const currentUser = await this.getCurrentUser(payload);
     const now = this.nowSql();
+    // Tạo userCode 
     const userCode =
       body.type_user === "midesk"
         ? await this.nextMideskUserCode()
         : String(body.userCode ?? this.unixNow());
-
+    // Tạo user mới
     const newUser = this.usersRepo.user.create({
       firstName: body.firstName,
       lastName: body.lastName,
@@ -608,11 +632,10 @@ export class UsersService {
       firstLogin: body.firstLogin ? 1 : 0,
       is_google2fa: body.is_google2fa ?? "disabled",
     });
-
+    // Lưu user
     const savedUser = await this.usersRepo.user.save(newUser);
     const insertedId = savedUser.id;
-
-    // 1. Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
+    // Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
     await this.syncJntUserAccessScopes(insertedId, body);
 
     // 2. Insert QRCodeMifone nếu có emailqr
