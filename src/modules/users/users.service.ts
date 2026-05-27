@@ -1382,18 +1382,7 @@ export class UsersService {
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
   ) {
-    this.validateCreateMember(body);
-    await this.assertEmailIsAvailable(String(body.email));
-
-    const group = await this.getGroupById(Number(body.groupId));
-    if (!group || group.status === "trash") {
-      this.throwError(
-        { group_not_exist: "Group không tồn tại." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
-    }
-
+    await this.validateAddMemberOfCompany(body);
     await this.assertGroupHasCapacity(Number(body.groupId));
 
     const currentUser = await this.getCurrentUser(payload);
@@ -2585,6 +2574,119 @@ export class UsersService {
       throw new HttpException(
         { code: 406, message: "Invalid parameters", error: { errors } },
         HttpStatus.NOT_ACCEPTABLE,
+      );
+    }
+  }
+
+  private async validateAddMemberOfCompany(body: Record<string, any>) {
+    const errors: Record<string, string> = {};
+
+    // 1. Validate firstName
+    if (body.firstName === undefined || body.firstName === null || String(body.firstName).trim() === "") {
+      errors.firstName = "Thông tin này là bắt buộc.";
+    } else if (String(body.firstName).length > 50) {
+      errors.firstName = "Xin nhập không quá 50 ký tự.";
+    }
+
+    // 2. Validate lastName
+    if (body.lastName === undefined || body.lastName === null || String(body.lastName).trim() === "") {
+      errors.lastName = "Thông tin này là bắt buộc.";
+    } else if (String(body.lastName).length > 50) {
+      errors.lastName = "Xin nhập không quá 50 ký tự.";
+    }
+
+    // 3. Validate email
+    const email = String(body.email ?? "").trim();
+    if (body.email === undefined || body.email === null || email === "") {
+      errors.email = "Thông tin này là bắt buộc.";
+    } else if (email.length < 6 || email.length > 255) {
+      errors.email = "Xin nhập từ 6 đến 255 ký tự.";
+    } else if (!this.isEmail(email)) {
+      errors.email = "Xin nhập đúng định dạng email.";
+    } else {
+      // Check email unique in database
+      const rows = await this.database.query<DbRow[]>(
+        "main",
+        "SELECT id FROM users WHERE email = ? AND status <> 'trash' LIMIT 1",
+        [email],
+      );
+      if (rows[0]) {
+        errors.email = "Đã tồn tại";
+      }
+    }
+
+    // 4. Validate password
+    const password = String(body.password ?? "");
+    if (body.password === undefined || body.password === null || password === "") {
+      errors.password = "Thông tin này là bắt buộc.";
+    } else if (password.length < 6 || password.length > 32) {
+      errors.password = "Xin nhập từ 6 đến 32 ký tự.";
+    }
+
+    // 5. Validate confirmPassword
+    if (body.confirmPassword === undefined || body.confirmPassword === null || String(body.confirmPassword) === "") {
+      errors.confirmPassword = "Thông tin này là bắt buộc.";
+    } else if (body.confirmPassword !== body.password) {
+      errors.confirmPassword = "Mật khẩu xác nhận không đúng.";
+    }
+
+    // 6. Validate groupId
+    if (body.groupId === undefined || body.groupId === null || String(body.groupId).trim() === "") {
+      errors.groupId = "Thông tin này là bắt buộc.";
+    } else if (isNaN(Number(body.groupId))) {
+      errors.groupId = "Xin nhập chữ số.";
+    } else {
+      // Check group exists and is active in database
+      const groupRows = await this.database.query<DbRow[]>(
+        "main",
+        "SELECT id, status FROM `groups` WHERE id = ? LIMIT 1",
+        [Number(body.groupId)],
+      );
+      const group = groupRows[0];
+      if (!group || group.status === "trash") {
+        errors.groupId = "Không tồn tại.";
+      }
+    }
+
+    // 7. Validate address
+    if (body.address !== undefined && body.address !== null && String(body.address) !== "") {
+      if (String(body.address).length > 255) {
+        errors.address = "Xin nhập không quá 255 ký tự.";
+      }
+    }
+
+    // 8. Validate note
+    if (body.note !== undefined && body.note !== null && String(body.note) !== "") {
+      if (String(body.note).length > 255) {
+        errors.note = "Xin nhập không quá 255 ký tự.";
+      }
+    }
+
+    // 9. Validate status
+    if (body.status !== undefined && body.status !== null && String(body.status) !== "") {
+      if (!["active", "lock", "pending", "trash"].includes(String(body.status))) {
+        errors.status = "Không nằm trong những thông tin cho phép.";
+      }
+    }
+
+    // 10. Validate role
+    if (body.role !== undefined && body.role !== null && String(body.role) !== "") {
+      if (!["agent", "manager", "supervisor", "admin", "superadmin"].includes(String(body.role))) {
+        errors.role = "Không nằm trong những thông tin cho phép.";
+      }
+    }
+
+    // Throw if there are errors
+    if (Object.keys(errors).length > 0) {
+      throw new HttpException(
+        {
+          code: 406,
+          message: "Invalid parameters",
+          error: {
+            errors,
+          },
+        },
+        HttpStatus.OK,
       );
     }
   }
