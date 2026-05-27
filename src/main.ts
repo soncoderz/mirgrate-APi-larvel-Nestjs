@@ -46,6 +46,22 @@ async function bootstrap() {
     origin: config.get<string>('CORS_ORIGIN', '*'),
   });
 
+  // Middleware ghi log request thời gian thực (Real-time HTTP Request Logging)
+  app.use((req: any, res: any, next: any) => {
+    const { method, originalUrl, ip } = req;
+    const startTime = Date.now();
+
+    res.on('finish', () => {
+      const { statusCode } = res;
+      const duration = Date.now() - startTime;
+      console.log(
+        `\x1b[36m[HTTP]\x1b[0m ${new Date().toLocaleString()} | \x1b[32m${method}\x1b[0m ${originalUrl} | Status: \x1b[33m${statusCode}\x1b[0m | IP: ${ip} | \x1b[35m+${duration}ms\x1b[0m`
+      );
+    });
+
+    next();
+  });
+
   // Đăng ký ValidationPipe toàn cục
   // - transform: true → tự động chuyển đổi kiểu dữ liệu (string → number, ...)
   // - whitelist: false → KHÔNG loại bỏ các property không có trong DTO
@@ -66,7 +82,7 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // Lấy port từ biến môi trường, mặc định là 3002
-  const port = config.get<number>('PORT', 3002);
+  const port = config.get<number>('PORT', 3001);
 
   // Khởi động HTTP server và lắng nghe trên port đã cấu hình
   await app.listen(port);

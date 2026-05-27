@@ -198,14 +198,14 @@ export class UsersService {
     const clientIp = this.getClientIp(request);
 
     if (!email || !password) {
-      this.throwError(
-        {
-          info: "Tên đăng nhập hoặc mật khẩu không chính xác.",
-          alias: "Error_Invalid_Account",
-        },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
+      await this.insertUserLog({
+        username: email,
+        password,
+        ip_address: clientIp,
+        status: "fail",
+        sign_in_time: this.unixNow(),
+      });
+      await this.handleLoginFail(email, clientIp);
     }
 
     const user = await this.findUserByEmail(email);
