@@ -3,26 +3,33 @@
  * users.service.ts - Service quản lý người dùng (Users) - FILE LỚN NHẤT
  * =============================================================================
  *
- * Service chứa toàn bộ logic cho module Users (~2200 dòng).
- * Đã MIGRATE hoàn chỉnh phần lớn logic từ UsersController.php trong Laravel.
+ * Service chứa toàn bộ logic cho module Users.
+ * Đã được chuyển đổi hoàn toàn sang TypeORM và Zod Validation.
+ * Theo sát các quy định trong tài liệu hướng dẫn chuyển đổi:
+ * - migration-guide/2_RULES.md (Quy tắc tương thích và an toàn dữ liệu)
+ * - migration-guide/8_AUTH_USER_CHECKLIST.md (Checklist hoàn thiện Auth/User)
+ * - migration-guide/9_FULL_API_MIGRATION_PLAN.md (Kế hoạch migration chi tiết)
  *
  * ═══════════════════════════════════════════════════════════════════
  * NHÓM 1: XÁC THỰC (Authentication)
  * ═══════════════════════════════════════════════════════════════════
- * - login()              → Đăng nhập: validate credentials, tạo JWT token,
- *                          ghi user_log, trả về thông tin user + group + privileges
- * - logout()             → Đăng xuất: cập nhật isOnline, ghi log
+ * - login()              → Đăng nhập: Validate thông tin bằng Zod, kiểm tra bcrypt,
+ *                          cập nhật trạng thái, ghi log đăng nhập (user_log),
+ *                          trả về thông tin JWT Token + User + Group + Privileges.
+ * - logout()             → Đăng xuất: Vô hiệu hóa token, hủy remember_token,
+ *                          cập nhật trạng thái log sang sign-out.
  *
  * ═══════════════════════════════════════════════════════════════════
  * NHÓM 2: CRUD NGƯỜI DÙNG
  * ═══════════════════════════════════════════════════════════════════
- * - me()                 → Lấy thông tin user đang đăng nhập + group + privileges
- * - getUsers()           → Danh sách users phân trang + search + sort + filter
- * - getUserByID()        → Chi tiết 1 user + group + privileges
- * - updateUser()         → Cập nhật thông tin user (update + SIP account)
- * - addUserAsMemberOfCompany() → Thêm user vào company
- *
- * Tương đương: UsersController.php + UserModel.php trong Laravel
+ * - me()                 → Lấy thông tin user hiện tại đang đăng nhập.
+ * - getUsers()           → Danh sách users phân trang + tìm kiếm + sắp xếp + lọc
+ *                          dùng SelectQueryBuilder của TypeORM.
+ * - getUserByID()        → Xem chi tiết thông tin của 1 user.
+ * - updateUser()         → Cập nhật thông tin user, upload avatar, cấu hình SIP,
+ *                          đồng bộ scope truy cập (JnTUserAccessScopes) và ghi lịch sử.
+ * - addUserAsMemberOfCompany() → Thêm thành viên mới vào công ty/group, kiểm tra giới hạn
+ *                                số lượng thành viên (capacity check), đồng bộ phòng ban.
  */
 
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
@@ -44,27 +51,26 @@ import {
   addUserAsMemberOfCompanySchema
 } from "./schemas/users.schemas";
 
-/** Type alias cho database row kết quả query */
+/** Type alias cho database row kết quả query dạng key-value */
 type DbRow = Record<string, any>;
 
 /**
- * AuthPayload - Cấu trúc dữ liệu trong JWT token
- * Được decode từ JWT token sau khi JwtAuthGuard xác thực.
- * Chứa thông tin cơ bản của user đã đăng nhập.
+ * AuthPayload - Cấu trúc dữ liệu được lưu trữ trong JWT token.
+ * Giải mã thông qua JwtAuthGuard để xác định danh tính user đang thao tác.
  */
 type AuthPayload = {
-  sub?: number;      // Subject (user ID) - theo chuẩn JWT
-  id?: number;       // User ID (duplicate of sub cho backward compatibility)
+  sub?: number;      // ID người dùng (theo tiêu chuẩn JWT)
+  id?: number;       // ID người dùng (backward compatibility với hệ thống cũ)
   email?: string;    // Email đăng nhập
   role?: string;     // Vai trò: 'superadmin', 'admin', 'agent', ...
-  groupId?: number;  // ID nhóm/công ty
-  typeId?: number;   // ID loại user (link đến user_types)
+  groupId?: number;  // ID của Group / Company
+  typeId?: number;   // ID của loại phân quyền (user_types)
 };
 
 /**
- * USER_SAFE_SELECT - Danh sách cột an toàn khi SELECT user
- * KHÔNG chứa cột 'password' để tránh leak mật khẩu trong response.
- * Tương đương với $hidden = ['password'] trong Laravel Model.
+ * USER_SAFE_SELECT - Danh sách các trường dữ liệu an toàn của User.
+ * KHÔNG SELECT cột 'password' và 'remember_token' để tránh rò rỉ dữ liệu nhạy cảm.
+ * Tương đương với thuộc tính $hidden trong Eloquent Model của Laravel.
  */
 const USER_SAFE_SELECT = `
   id,userCode,firstName,lastName,mobile,phone,avatar,email,typeId,groupId,
@@ -75,6 +81,7 @@ const USER_SAFE_SELECT = `
   otherId,otherEmail,google2fa_secret,is_google2fa
 `;
 
+/** Danh sách các trường có phép thay đổi khi cập nhật thông tin user */
 const USER_MUTABLE_COLUMNS = new Set([
   "firstName",
   "lastName",
@@ -102,6 +109,7 @@ const USER_MUTABLE_COLUMNS = new Set([
   "groups_view",
 ]);
 
+/** Danh sách toàn bộ các cột trong bảng users dùng cho mục đích lọc và sắp xếp động */
 const USER_TABLE_COLUMNS = new Set([
   "id",
   "userCode",
@@ -148,6 +156,7 @@ const USER_TABLE_COLUMNS = new Set([
   "is_google2fa",
 ]);
 
+/** Các kiểu toán tử lọc động được hỗ trợ trong API danh sách users */
 const USER_FILTER_TYPES = new Set([
   "like",
   "like_left",
@@ -177,11 +186,18 @@ export class UsersService {
     private readonly blacklist: JwtBlacklistService,
   ) {}
 
+  /**
+   * POST /api/v1/login
+   * Xử lý đăng nhập hệ thống: kiểm tra thông tin, so khớp password, ghi log đăng nhập.
+   * Đồng thời gộp thông tin cấu hình queue, extension của hotline và quyền hạn.
+   * Ánh xạ TypeORM: Sử dụng UserRepository và UserLogRepository thay thế mysql2 thô.
+   */
   async login(body: Record<string, any>, request: Request) {
     const email = String(body.email ?? "").trim();
     const password = String(body.password ?? "");
     const clientIp = this.getClientIp(request);
 
+    // 1. Kiểm tra trống email/password
     if (!email || !password) {
       await this.insertUserLog({
         username: email,
@@ -194,6 +210,7 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
+    // 2. Tìm kiếm user theo email
     const user = await this.findUserByEmail(email);
     if (!user) {
       await this.insertUserLog({
@@ -207,6 +224,7 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
+    // 3. So khớp mật khẩu bcrypt (có hỗ trợ tiền tố $2y$ của Laravel PHP)
     const passwordMatches = await bcrypt.compare(
       password,
       this.normalizeBcryptHash(user.password),
@@ -223,6 +241,7 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
+    // 4. Kiểm tra trạng thái tài khoản
     if (user.status !== "active") {
       await this.insertUserLog({
         username: email,
@@ -233,12 +252,14 @@ export class UsersService {
       this.throwLockedAccount();
     }
 
+    // 5. Tạo token JWT đồng bộ claim set với Laravel
     const token = await this.signUserToken(
       user,
       Boolean(body.remember_token),
       request,
     );
 
+    // Verify ngược lại token để trích xuất payload
     const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
       secret: this.jwtSecret(),
       algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
@@ -251,11 +272,13 @@ export class UsersService {
       );
     }
 
+    // 6. Kiểm tra trạng thái hoạt động của Group/Company
     const group = curUser.groupId ? await this.getGroupForLogin(curUser.groupId) : null;
     if (!group || group.status === "lock") {
       this.throwLockedAccount();
     }
 
+    // Ghi log đăng nhập thành công
     const userLog = await this.insertUserLog({
       username: email,
       password,
@@ -265,6 +288,7 @@ export class UsersService {
       sign_in_time: this.unixNow(),
     });
 
+    // Cập nhật trạng thái hoạt động trực tuyến của User
     await this.userRepository.update(curUser.id, {
       lastLogin: this.nowSql(),
       isOnline: 1,
@@ -278,6 +302,7 @@ export class UsersService {
     );
     const groupHotline = curUser.groupId ? await this.getGroupHotline(curUser.groupId) : [];
 
+    // Gộp cấu hình queue từ hotline của group
     for (const value of groupHotline) {
       if (value.queue_config && this.isJson(value.queue_config)) {
         this.assignMissing(queueConfig, JSON.parse(value.queue_config));
@@ -303,6 +328,10 @@ export class UsersService {
     };
   }
 
+  /**
+   * POST /api/v1/logout
+   * Đăng xuất: Vô hiệu hóa token (in-memory blacklist), hủy remember_token, cập nhật sign-out log.
+   */
   async logout(body: Record<string, any>, request: Request) {
     const token = this.extractBearerToken(request.headers.authorization);
     if (!token) {
@@ -350,6 +379,7 @@ export class UsersService {
         });
       }
 
+      // Cập nhật log đăng nhập sang trạng thái sign-out
       if (log.status === "sign-in") {
         await this.userLogRepository.update(logId, {
           status: "sign-out",
@@ -359,11 +389,16 @@ export class UsersService {
       }
     }
 
+    // Đưa token hiện tại vào blacklist để vô hiệu hóa
     this.invalidateToken(token, (payload as { exp?: number }).exp);
 
     return { message: "Logout success", code: 200 };
   }
 
+  /**
+   * GET /api/v1/me
+   * Lấy thông tin user hiện tại từ token JWT.
+   */
   async me(payload: AuthPayload | undefined) {
     const user = await this.getCurrentUser(payload);
     if (!user) {
@@ -373,6 +408,11 @@ export class UsersService {
     return { message: "Success", code: 200 };
   }
 
+  /**
+   * POST /api/v1/users
+   * Lấy danh sách users phân trang có tìm kiếm, sắp xếp và lọc động.
+   * Ánh xạ TypeORM: Sử dụng SelectQueryBuilder kết nối nhiều bảng, trả về Laravel-like pagination.
+   */
   async getUsers(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -386,6 +426,7 @@ export class UsersService {
       );
     }
 
+    // Khởi tạo QueryBuilder với tên bảng chính là users
     const qb = this.userRepository.createQueryBuilder("users")
       .leftJoin("departments", "departments", "departments.id = users.departmentId")
       .leftJoin("user_types", "user_types", "user_types.id = users.typeId")
@@ -393,8 +434,10 @@ export class UsersService {
       .leftJoin("qr_code", "qr_code", "qr_code.userId = users.id")
       .leftJoin("user_config", "user_config", "user_config.userid = users.id");
 
+    // Lọc bỏ các tài khoản bị xóa (status = trash)
     qb.where("users.status <> :statusTrash", { statusTrash: "trash" });
 
+    // Kiểm tra quyền hạn lọc GroupId theo người dùng hiện tại
     if (currentUser?.role !== "superadmin") {
       if (!this.isPhpEmpty(body.groupId)) {
         qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
@@ -419,6 +462,7 @@ export class UsersService {
       qb.andWhere("users.role = :roleId", { roleId: body.roleId });
     }
 
+    // Hỗ trợ tìm kiếm từ khóa
     if (!this.isPhpEmpty(body.search) && !Array.isArray(body.search)) {
       const keyword = `%${String(body.search)}%`;
       qb.andWhere(new Brackets(qbSub => {
@@ -431,14 +475,17 @@ export class UsersService {
       }));
     }
 
+    // Áp dụng bộ lọc động từ client
     this.applyUserFilters(body.filters, qb);
 
+    // Đếm tổng số lượng bản ghi khớp điều kiện
     const total = await qb.getCount();
 
     const perPage = this.normalizeLaravelRecordsOnPage(body.recordsOnPage);
     const currentPage = this.normalizePage(body.page ?? 1);
     const offset = (currentPage - 1) * perPage;
 
+    // Chọn các trường cụ thể, bổ sung thông tin join và sub-queries
     qb.select("users.*")
       .addSelect("departments.name", "departmentName")
       .addSelect("user_types.name", "typeName")
@@ -452,6 +499,7 @@ export class UsersService {
 
     qb.limit(perPage).offset(offset);
 
+    // Áp dụng sắp xếp động
     this.applyUserOrder(qb, body.sorts);
 
     const data = await qb.getRawMany();
@@ -460,6 +508,10 @@ export class UsersService {
     return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
   }
 
+  /**
+   * GET /api/v1/user/:id
+   * Lấy chi tiết thông tin của một user theo ID.
+   */
   async getUserByID(id: string) {
     const user = await this.findUserById(Number(id), true);
     if (!user) {
@@ -473,6 +525,11 @@ export class UsersService {
     return this.sanitizeUser(user);
   }
 
+  /**
+   * POST /api/v1/updateUser
+   * Cập nhật thông tin user, upload avatar, đồng bộ phòng ban, scope và ghi lịch sử thay đổi.
+   * Ánh xạ Zod: Gọi validateUpdateUserZod trước để kiểm tra tính hợp lệ dữ liệu tầng nghiệp vụ.
+   */
   async updateUser(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -481,7 +538,7 @@ export class UsersService {
     const userId = Number(body.id);
     const params = this.filteredUpdateUserParams(body);
     
-    // Call Zod validation (throws HttpException 406 on failure)
+    // Validate bằng Zod Schema + superRefine (nếu lỗi sẽ ném HttpException 406)
     await this.validateUpdateUserZod(params, userId);
 
     const user = await this.findRawUserById(userId, true);
@@ -506,8 +563,10 @@ export class UsersService {
     for (const [key, value] of updates.entries()) {
       updateObj[key] = value;
     }
+    // Thực hiện update bản ghi thông qua UserRepository
     await this.userRepository.update(userId, updateObj);
 
+    // Đồng bộ các thông tin liên quan (scope, config, department, logs)
     await this.syncJntUserAccessScopes(userId, body);
     await this.upsertUserConfig(userId, body, currentUser?.id);
 
@@ -523,12 +582,17 @@ export class UsersService {
     };
   }
 
+  /**
+   * POST /api/v1/addUserAsMemberOfCompany
+   * Thêm thành viên mới vào công ty/group.
+   * Ánh xạ Zod: validateAddMemberOfCompanyZod kiểm tra ràng buộc bao gồm giới hạn số user (limitUser).
+   */
   async addUserAsMemberOfCompany(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
   ) {
-    // Call Zod validation (throws HttpException 406 wrapped in HttpStatus.OK on failure)
+    // Validate bằng Zod Schema kết hợp DB check (trả về HttpStatus.OK (200) chứa mã lỗi 406 khi có lỗi)
     await this.validateAddMemberOfCompanyZod(body);
 
     const currentUser = await this.getCurrentUser(payload);
@@ -538,6 +602,7 @@ export class UsersService {
         ? await this.nextMideskUserCode()
         : String(body.userCode ?? this.unixNow());
 
+    // Khởi tạo Entity thông qua userRepository.create
     const newUser = this.userRepository.create({
       firstName: body.firstName,
       lastName: body.lastName,
@@ -568,10 +633,10 @@ export class UsersService {
     const savedUser = await this.userRepository.save(newUser);
     const insertedId = savedUser.id;
 
-    // 1. Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
+    // 1. Đồng bộ JnTUserAccessScopes
     await this.syncJntUserAccessScopes(insertedId, body);
 
-    // 2. Insert QRCodeMifone nếu có emailqr
+    // 2. Insert QRCodeMifone (sử dụng raw query do chưa khai báo Entity)
     if (!this.isPhpEmpty(body.emailqr)) {
       if (await this.tableExists("qrcode_mifone")) {
         await this.entityManager.query(
@@ -581,7 +646,7 @@ export class UsersService {
       }
     }
 
-    // 3. Upload avatar nếu có file
+    // 3. Upload avatar nếu có file đính kèm
     if (avatar?.buffer) {
       const avatarName = await this.storeUserAvatar(insertedId, avatar);
       await this.userRepository.update(insertedId, { avatar: avatarName });
@@ -595,7 +660,7 @@ export class UsersService {
       currentUser,
     );
 
-    // 4. Update departments.extensions nếu có departmentId và extension
+    // 4. Cập nhật departments.extensions
     await this.updateDepartmentExtension(body);
 
     return {
@@ -617,7 +682,7 @@ export class UsersService {
       });
       this.invalidateToken(token, (payload as { exp?: number }).exp);
     } catch {
-      // Laravel JWTAuth::invalidate() ignores invalid/expired remember_token here.
+      // Laravel JWTAuth::invalidate() bỏ qua lỗi token không hợp lệ ở đây.
     }
   }
 
@@ -909,6 +974,9 @@ export class UsersService {
     return this.userLogRepository.findOne({ where: { id } });
   }
 
+  /**
+   * Kiểm tra và khóa tạm thời IP Client nếu đăng nhập thất bại liên tục (>= 5 lần) trong ngày.
+   */
   private async handleLoginFail(email: string, ip: string): Promise<never> {
     const total = await this.userLogRepository.count({
       where: {
@@ -933,6 +1001,9 @@ export class UsersService {
     this.throwInvalidAccount();
   }
 
+  /**
+   * Khóa tài khoản (status = lock) nếu nhập sai mật khẩu liên tục (>= 5 lần) kể từ lần đăng nhập gần nhất.
+   */
   private async handleInvalidPassword(email: string): Promise<never> {
     const lastLog = await this.userLogRepository.findOne({
       where: {
@@ -1001,6 +1072,12 @@ export class UsersService {
     return params;
   }
 
+  /**
+   * Quy trình validate bất đồng bộ qua Zod schema khi cập nhật user:
+   * - Kiểm tra email duy nhất (ngoại trừ bản thân).
+   * - Xác thực sự tồn tại của GroupId trong bảng groups.
+   * - Đảm bảo số lượng thành viên trong Group hoạt động không vượt giới hạn (limitUser).
+   */
   private async validateUpdateUserZod(body: any, userId: number) {
     const schema = updateUserSchema.superRefine(async (data, ctx) => {
       if (data.email) {
@@ -1060,6 +1137,14 @@ export class UsersService {
     }
   }
 
+  /**
+   * Quy trình validate bất đồng bộ qua Zod schema khi thêm thành viên mới:
+   * - Xác nhận mật khẩu trùng khớp (đã xử lý tại schema chính).
+   * - Kiểm tra email duy nhất (không tính status = trash).
+   * - Kiểm tra tính hợp lệ của GroupId.
+   * - Kiểm tra giới hạn số lượng thành viên (capacity check).
+   * Trả về HTTP Code 200 (HttpStatus.OK) kèm body 406 để tương thích với Frontend cũ.
+   */
   private async validateAddMemberOfCompanyZod(body: any) {
     const schema = addUserAsMemberOfCompanySchema.superRefine(async (data, ctx) => {
       if (data.email) {
