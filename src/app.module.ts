@@ -18,16 +18,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { CommonModule } from "./common/common.module";
 import { DatabaseModule } from "./config/database.module";
 import { createMysqlTypeOrmOptions } from "./config/typeorm.options";
-import { AuthModule } from "./modules/auth/auth.module";
-import { CdrModule } from "./modules/cdr/cdr.module";
-import { ConnectorModule } from "./modules/connector/connector.module";
-import { CustomersModule } from "./modules/customers/customers.module";
-import { ExportsModule } from "./modules/exports/exports.module";
-import { GroupsModule } from "./modules/groups/groups.module";
-import { IvrInboundModule } from "./modules/ivr-inbound/ivr-inbound.module";
-import { QueueLogsModule } from "./modules/queue-logs/queue-logs.module";
 import { UsersModule } from "./modules/users/users.module";
-import { UserTypesModule } from "./modules/user-types/user-types.module";
 import { AppController } from "./app.controller";
 
 /**
@@ -121,16 +112,7 @@ import { AppController } from "./app.controller";
 
     // --- Các feature module (tương đương các Controller group trong Laravel routes/api.php) ---
 
-    AuthModule,       // Xử lý đăng nhập/đăng xuất (route: login, logout, forgotPassword, ...)
     UsersModule,      // Quản lý user (route: users, updateUser, deleteUser, ...)
-    GroupsModule,     // Quản lý group/company (route: groups, addGroup, ...)
-    CustomersModule,  // Quản lý khách hàng (route: customers, addCustomer, ...)
-    CdrModule,        // Báo cáo cuộc gọi CDR (route: cdr/getCalls, cdr/getStaticCalls, ...)
-    QueueLogsModule,  // Báo cáo hàng đợi (route: queuelog/reportByQueues, ...)
-    IvrInboundModule, // Cấu hình IVR inbound (route: ivr_inbound/getIVRInboundDID, ...)
-    UserTypesModule,  // Quản lý loại user (route: userTypes, insertUserType, ...)
-    ExportsModule,    // Download/export file (route: export/:fileName, ...)
-    ConnectorModule,  // API connector cho hệ thống ngoài (route: connector/...)
   ],
 
   // Controller gốc - xử lý route test cơ bản

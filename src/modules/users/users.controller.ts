@@ -50,7 +50,6 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { Request } from "express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
-import { MigrationStubService } from "../../common/services/migration-stub.service";
 import {
   AddUserAsMemberOfCompanyBody,
   UpdateUserBody,
@@ -61,6 +60,10 @@ import {
   updateUserSchema,
   userIdParamSchema,
   usersQuerySchema,
+  LoginBody,
+  loginSchema,
+  LogoutBody,
+  logoutSchema,
 } from "./schemas/users.schemas";
 import { UsersService } from "./users.service";
 
@@ -68,7 +71,6 @@ import { UsersService } from "./users.service";
 type RequestWithUser = Request & { user?: Record<string, unknown> };
 
 @Controller("v1")
-@UseGuards(JwtAuthGuard)
 export class UsersController {
   /**
    * Zod pipe này dùng riêng cho payload JWT đã được `JwtAuthGuard` gắn vào
@@ -80,7 +82,6 @@ export class UsersController {
   );
 
   constructor(
-    private readonly stub: MigrationStubService,
     private readonly users: UsersService,
   ) {}
 
@@ -95,21 +96,42 @@ export class UsersController {
       : undefined;
   }
 
-  private notMigrated(
-    action: string,
-    method: string,
-    path: string,
-    body?: unknown,
-    params?: unknown,
+  /**
+   * POST /api/v1/login
+   * Đăng nhập - route chính của ứng dụng
+   *
+   * @param body - { email: string, password: string, remember_token?: any }
+   * @param request - Express Request (để lấy IP client)
+   * @returns { success: { token, user, group, privilege, ... } }
+   *
+   * Tương đương: UsersController@login trong Laravel
+   */
+  @Post("login")
+  @HttpCode(200)
+  login(
+    @Body(new ZodValidationPipe(loginSchema)) body: LoginBody,
+    @Req() request: Request,
   ) {
-    return this.stub.notMigrated({
-      controller: "UsersController",
-      action,
-      method,
-      path,
-      body,
-      params,
-    });
+    return this.users.login(body, request);
+  }
+
+  /**
+   * POST /api/v1/logout
+   * Đăng xuất - cập nhật trạng thái offline và ghi log
+   *
+   * @param body - { id?: number } - ID của user_log record
+   * @param request - Express Request (để lấy token từ header)
+   * @returns { message: 'Logout success', code: 200 }
+   *
+   * Tương đương: UsersController@logout trong Laravel
+   */
+  @Post("logout")
+  @HttpCode(200)
+  logout(
+    @Body(new ZodValidationPipe(logoutSchema)) body: LogoutBody,
+    @Req() request: Request,
+  ) {
+    return this.users.logout(body, request);
   }
 
   /**
@@ -122,6 +144,7 @@ export class UsersController {
    * Tương đương: UsersController@me trong Laravel (phiên bản đã đăng nhập)
    */
   @Get("me")
+  @UseGuards(JwtAuthGuard)
   me(@Req() request: RequestWithUser) {
     return this.users.me(this.parseRequestUser(request));
   }
@@ -138,6 +161,7 @@ export class UsersController {
    */
   @Post("users")
   @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
   getUsers(
     // Validate các tham số phân trang/lọc/sắp xếp ngay ở boundary controller.
     // Service chỉ còn tập trung build query và xử lý nghiệp vụ.
@@ -145,44 +169,6 @@ export class UsersController {
     @Req() request: RequestWithUser,
   ) {
     return this.users.getUsers(body, this.parseRequestUser(request), request);
-  }
-
-  /**
-   * POST /api/v1/usersByRole
-   * Lấy danh sách người dùng lọc theo vai trò (role)
-   *
-   * @param body - { role: string }
-   * @param request - Request chứa payload người dùng hiện tại
-   * @returns Danh sách người dùng thỏa mãn điều kiện lọc theo role
-   *
-   * Tương đương: UsersController@getUsersByRole trong Laravel
-   */
-  @Post("usersByRole")
-  @HttpCode(200)
-  getUsersByRole(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.getUsersByRole(body, request.user);
-  }
-
-  /**
-   * POST /api/v1/usersByExt
-   * Lấy thông tin chi tiết người dùng dựa vào số máy lẻ (extension)
-   *
-   * @param body - { extension: string }
-   * @param request - Request chứa payload người dùng hiện tại
-   * @returns Chi tiết người dùng sở hữu extension đó
-   *
-   * Tương đương: UsersController@getUserInfoByExtension trong Laravel
-   */
-  @Post("usersByExt")
-  @HttpCode(200)
-  getUserInfoByExtension(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.getUserInfoByExtension(body, request.user);
   }
 
   /**
@@ -195,6 +181,7 @@ export class UsersController {
    * Tương đương: UsersController@getUserByID trong Laravel
    */
   @Get("user/:id")
+  @UseGuards(JwtAuthGuard)
   getUserByID(
     // Validate toàn bộ param object để `id` luôn là số hợp lệ trước khi gọi service.
     @Param(new ZodValidationPipe(userIdParamSchema)) params: UserIdParams,
@@ -215,6 +202,7 @@ export class UsersController {
    */
   @Post("updateUser")
   @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor("avatar"))
   updateUser(
     // Với multipart/form-data, Nest parse file qua interceptor; phần text fields
@@ -224,21 +212,6 @@ export class UsersController {
     @Req() request: RequestWithUser,
   ) {
     return this.users.updateUser(body, this.parseRequestUser(request), avatar);
-  }
-
-  /**
-   * POST /api/v1/updateUserInfoByField
-   * Cập nhật nhanh một trường cụ thể của người dùng (is_webRTC hoặc is_receive_chat)
-   *
-   * @param body - { user_id: number, is_webRTC?: boolean, is_receive_chat?: boolean }
-   * @returns Trạng thái thành công hoặc thất bại của quá trình update
-   *
-   * Tương đương: UsersController@updateUserInfoByField trong Laravel
-   */
-  @Post("updateUserInfoByField")
-  @HttpCode(200)
-  updateUserInfoByField(@Body() body: Record<string, unknown>) {
-    return this.users.updateUserInfoByField(body);
   }
 
   /**
@@ -254,6 +227,7 @@ export class UsersController {
    */
   @Post("addUserAsMemberOfCompany")
   @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor("avatar"))
   addUserAsMemberOfCompany(
     // Schema này kiểm tra các field bắt buộc khi tạo user trong công ty; file
@@ -268,426 +242,5 @@ export class UsersController {
       this.parseRequestUser(request),
       avatar,
     );
-  }
-
-  /**
-   * POST /api/v1/getUserNameByAgentsView
-   * Tra cứu tên và mã agent từ danh sách mã agent (agents view)
-   *
-   * @param body - { list_agents: string | string[] } - Danh sách agent cần lấy tên
-   * @returns Bản đồ chứa thông tin agent được ánh xạ dạng key-value
-   *
-   * Tương đương: UsersController@getUserNameByAgentsView trong Laravel
-   */
-  @Post("getUserNameByAgentsView")
-  @HttpCode(200)
-  getUserNameByAgentsView(@Body() body: Record<string, unknown>) {
-    return this.users.getUserNameByAgentsView(body);
-  }
-
-  /**
-   * POST /api/v1/getUserModuleShow
-   * Lấy cấu hình các module được phép hiển thị cho user - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@getUserModuleShow trong Laravel
-   */
-  @Post("getUserModuleShow")
-  getUserModuleShow(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "getUserModuleShow",
-      "POST",
-      "/api/v1/getUserModuleShow",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/getUsersByGroupId
-   * Lấy danh sách người dùng trong một group cụ thể, nhóm theo số máy lẻ (extension)
-   *
-   * @param body - { groupId: number, all?: boolean }
-   * @returns Map các user với key là extension (hoặc danh sách phẳng nếu all = true)
-   *
-   * Tương đương: UsersController@getUsersByGroupId trong Laravel
-   */
-  @Post("getUsersByGroupId")
-  @HttpCode(200)
-  getUsersByGroupId(@Body() body: Record<string, unknown>) {
-    return this.users.getUsersByGroupId(body);
-  }
-
-  /**
-   * POST /api/v1/getHistory
-   * Xem lịch sử thao tác của người dùng - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@getHistory trong Laravel
-   */
-  @Post("getHistory")
-  getHistory(@Body() body: Record<string, unknown>) {
-    return this.notMigrated("getHistory", "POST", "/api/v1/getHistory", body);
-  }
-
-  /**
-   * POST /api/v1/duplicatePrivilege
-   * Sao chép phân quyền từ user này sang user khác - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@duplicatePrivilege trong Laravel
-   */
-  @Post("duplicatePrivilege")
-  duplicatePrivilege(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "duplicatePrivilege",
-      "POST",
-      "/api/v1/duplicatePrivilege",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/exportPrivilege
-   * Xuất danh sách phân quyền của các user ra file Excel - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@exportPrivilege trong Laravel
-   */
-  @Post("exportPrivilege")
-  exportPrivilege(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "exportPrivilege",
-      "POST",
-      "/api/v1/exportPrivilege",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/unsetUserAvatar
-   * Xóa ảnh đại diện hiện tại của người dùng - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@unsetUserAvatar trong Laravel
-   */
-  @Post("unsetUserAvatar")
-  unsetUserAvatar(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "unsetUserAvatar",
-      "POST",
-      "/api/v1/unsetUserAvatar",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/getConfigTrunkPDS
-   * Lấy danh sách cấu hình trung kế PDS - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@getConfigTrunkPDS trong Laravel
-   */
-  @Post("getConfigTrunkPDS")
-  getConfigTrunkPDS(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "getConfigTrunkPDS",
-      "POST",
-      "/api/v1/getConfigTrunkPDS",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/insertConfigTrunkPDS
-   * Thêm cấu hình trung kế PDS mới - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@insertConfigTrunkPDS trong Laravel
-   */
-  @Post("insertConfigTrunkPDS")
-  insertConfigTrunkPDS(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "insertConfigTrunkPDS",
-      "POST",
-      "/api/v1/insertConfigTrunkPDS",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/updateConfigTrunkPDS
-   * Cập nhật cấu hình trung kế PDS - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@updateConfigTrunkPDS trong Laravel
-   */
-  @Post("updateConfigTrunkPDS")
-  updateConfigTrunkPDS(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "updateConfigTrunkPDS",
-      "POST",
-      "/api/v1/updateConfigTrunkPDS",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/deleteConfigTrunkPDS
-   * Xóa cấu hình trung kế PDS - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@deleteConfigTrunkPDS trong Laravel
-   */
-  @Post("deleteConfigTrunkPDS")
-  deleteConfigTrunkPDS(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "deleteConfigTrunkPDS",
-      "POST",
-      "/api/v1/deleteConfigTrunkPDS",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/getBlackList
-   * Lấy danh sách số điện thoại trong danh sách đen (Blacklist) - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@getBlackList trong Laravel
-   */
-  @Post("getBlackList")
-  getBlackList(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "getBlackList",
-      "POST",
-      "/api/v1/getBlackList",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/insertBlackList
-   * Thêm số điện thoại vào danh sách đen - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@insertBlackList trong Laravel
-   */
-  @Post("insertBlackList")
-  insertBlackList(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "insertBlackList",
-      "POST",
-      "/api/v1/insertBlackList",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/updateBlackList
-   * Cập nhật số điện thoại trong danh sách đen - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@updateBlackList trong Laravel
-   */
-  @Post("updateBlackList")
-  updateBlackList(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "updateBlackList",
-      "POST",
-      "/api/v1/updateBlackList",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/deleteBlackList
-   * Xóa số điện thoại khỏi danh sách đen - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@deleteBlackList trong Laravel
-   */
-  @Post("deleteBlackList")
-  deleteBlackList(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "deleteBlackList",
-      "POST",
-      "/api/v1/deleteBlackList",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/importBlackList
-   * Import danh sách đen từ file Excel - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@importBlackList trong Laravel
-   */
-  @Post("importBlackList")
-  importBlackList(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "importBlackList",
-      "POST",
-      "/api/v1/importBlackList",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/getUserTeam
-   * Lấy danh sách team/nhóm trực thuộc của người dùng
-   *
-   * @returns Mảng danh sách team (Hiện tại Laravel trả về rỗng mặc định)
-   *
-   * Tương đương: UsersController@getUserTeam trong Laravel
-   */
-  @Post("getUserTeam")
-  @HttpCode(200)
-  getUserTeam(@Body() body: Record<string, unknown>) {
-    return this.users.getUserTeam();
-  }
-
-  /**
-   * POST /api/v1/UpsertUserTeam
-   * Thêm mới hoặc cập nhật thông tin team cho người dùng - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@UpsertUserTeam trong Laravel
-   */
-  @Post("UpsertUserTeam")
-  upsertUserTeam(@Body() body: Record<string, unknown>) {
-    return this.notMigrated(
-      "UpsertUserTeam",
-      "POST",
-      "/api/v1/UpsertUserTeam",
-      body,
-    );
-  }
-
-  /**
-   * POST /api/v1/deleteTeam
-   * Xóa team của người dùng - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@deleteTeam trong Laravel
-   */
-  @Post("deleteTeam")
-  deleteTeam(@Body() body: Record<string, unknown>) {
-    return this.notMigrated("deleteTeam", "POST", "/api/v1/deleteTeam", body);
-  }
-
-  /**
-   * POST /api/v1/deleteUser
-   * Thực hiện xóa mềm một người dùng (chuyển status thành 'trash' và ghi log)
-   *
-   * @param body - { id: number } - ID của user cần xóa
-   * @param request - Request chứa payload người dùng thực hiện xóa
-   * @returns Trạng thái thành công của tác vụ
-   *
-   * Tương đương: UsersController@removeUser trong Laravel
-   */
-  @Post("deleteUser")
-  @HttpCode(200)
-  removeUser(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.removeUser(body, request.user);
-  }
-
-  /**
-   * POST /api/v1/deleteUsers
-   * Thực hiện xóa mềm hàng loạt nhiều người dùng
-   *
-   * @param body - { list_id: number[] | string } - Mảng ID hoặc chuỗi ID ngăn cách bởi dấu phẩy
-   * @param request - Request chứa payload người dùng thực hiện xóa
-   * @returns Trạng thái thành công của tác vụ
-   *
-   * Tương đương: UsersController@removeUsers trong Laravel
-   */
-  @Post("deleteUsers")
-  @HttpCode(200)
-  removeUsers(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.removeUsers(body, request.user);
-  }
-
-  /**
-   * GET /api/v1/duplicateUser/:id
-   * Nhân bản thông tin và phân quyền từ một người dùng sẵn có
-   *
-   * @param id - ID của người dùng nguồn cần nhân bản
-   * @param request - Request chứa payload người dùng thực hiện nhân bản
-   * @returns Trạng thái thành công kèm theo ID của user mới
-   *
-   * Tương đương: UsersController@duplicateUser trong Laravel
-   */
-  @Get("duplicateUser/:id")
-  duplicateUser(@Param("id") id: string, @Req() request: RequestWithUser) {
-    return this.users.duplicateUser(id, request.user);
-  }
-
-  /**
-   * POST /api/v1/getUserLogs
-   * Lấy lịch sử đăng nhập/đăng xuất của hệ thống (phân trang và lọc)
-   *
-   * @param body - Lọc logs theo username, thời gian hoặc phân trang
-   * @param request - Request chứa thông tin user thực hiện xem log
-   * @returns Danh sách logs phân trang theo chuẩn Laravel
-   *
-   * Tương đương: UsersController@getUserLogs trong Laravel
-   */
-  @Post("getUserLogs")
-  @HttpCode(200)
-  getUserLogs(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.getUserLogs(body, request.user);
-  }
-
-  /**
-   * POST /api/v1/deleteUserLog
-   * Xóa một bản ghi lịch sử đăng nhập cụ thể theo ID
-   *
-   * @param body - { id: number } - ID của dòng log cần xóa
-   * @returns Trạng thái thành công của tác vụ
-   *
-   * Tương đương: UsersController@deleteUserLog trong Laravel
-   */
-  @Post("deleteUserLog")
-  @HttpCode(200)
-  deleteUserLog(@Body() body: Record<string, unknown>) {
-    return this.users.deleteUserLog(body);
-  }
-
-  /**
-   * POST /api/v1/logoutUserManual
-   * Quản trị viên bắt buộc đăng xuất một người dùng đang online (hủy online và blacklist token)
-   *
-   * @param body - { id: number } - ID người dùng cần kick out
-   * @param request - Request chứa payload người dùng thực hiện thao tác
-   * @returns Trạng thái thành công của tác vụ
-   *
-   * Tương đương: UsersController@logoutUserManual trong Laravel
-   */
-  @Post("logoutUserManual")
-  @HttpCode(200)
-  logoutUserManual(
-    @Body() body: Record<string, unknown>,
-    @Req() request: RequestWithUser,
-  ) {
-    return this.users.logoutUserManual(body, request.user);
-  }
-
-  /**
-   * GET /api/v1/getuserLogsByGroupId/:groupId
-   * Lấy lịch sử đăng nhập/đăng xuất lọc theo groupId (để xác định user đang online)
-   *
-   * @param groupId - ID của nhóm/công ty cần lấy log
-   * @returns Danh sách log của group đó
-   *
-   * Tương đương: UsersController@getuserLogsByGroupId trong Laravel
-   */
-  @Get("getuserLogsByGroupId/:groupId")
-  getuserLogsByGroupId(@Param("groupId") groupId: string) {
-    return this.users.getuserLogsByGroupId(groupId);
-  }
-
-  /**
-   * POST /api/v1/exportUsers
-   * Xuất danh sách người dùng ra file Excel - CHƯA MIGRATE
-   *
-   * Tương đương: UsersController@exportUsers trong Laravel
-   */
-  @Post("exportUsers")
-  exportUsers(@Body() body: Record<string, unknown>) {
-    return this.notMigrated("exportUsers", "POST", "/api/v1/exportUsers", body);
   }
 }
