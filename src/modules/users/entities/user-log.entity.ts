@@ -37,4 +37,7 @@ export class UserLogEntity {
 
   @Column({ type: "int", nullable: true })
   updated_by: number | null;
+
+  @Column({ name: "userCode", type: "varchar", length: 50, nullable: true })
+  userCode: string | null;
 }

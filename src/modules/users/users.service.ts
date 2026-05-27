@@ -11,44 +11,16 @@
  * ═══════════════════════════════════════════════════════════════════
  * - login()              → Đăng nhập: validate credentials, tạo JWT token,
  *                          ghi user_log, trả về thông tin user + group + privileges
- * - loginExternal()      → Đăng nhập từ hệ thống bên ngoài (CRM, Salesforce)
  * - logout()             → Đăng xuất: cập nhật isOnline, ghi log
- * - checkToken()         → Kiểm tra JWT token hợp lệ
- * - checkRecaptcha()     → Xác thực Google reCAPTCHA
- * - forgotPassword()     → Gửi email reset password (tạo token + gửi mail)
- * - changePasswordForgot()→ Đổi mật khẩu từ link reset
- * - resetPassword()      → Đổi mật khẩu (yêu cầu mật khẩu cũ)
- * - getUserToken()       → Lấy JWT token bằng email + password (API integration)
  *
  * ═══════════════════════════════════════════════════════════════════
  * NHÓM 2: CRUD NGƯỜI DÙNG
  * ═══════════════════════════════════════════════════════════════════
  * - me()                 → Lấy thông tin user đang đăng nhập + group + privileges
  * - getUsers()           → Danh sách users phân trang + search + sort + filter
- * - getUsersByRole()     → Users theo role (admin, agent, ...)
  * - getUserByID()        → Chi tiết 1 user + group + privileges
- * - getUserInfoByExtension() → Thông tin user theo số extension
- * - getUsersByGroupId()  → Users theo groupId
  * - updateUser()         → Cập nhật thông tin user (update + SIP account)
  * - addUserAsMemberOfCompany() → Thêm user vào company
- * - addUserAsCompany()   → Tạo company mới + admin user
- * - addUserByExcel()     → Import users từ Excel (stub)
- *
- * ═══════════════════════════════════════════════════════════════════
- * NHÓM 3: USER LOGS (Lịch sử đăng nhập)
- * ═══════════════════════════════════════════════════════════════════
- * - getUserLogs()        → Danh sách logs phân trang
- * - deleteUserLog()      → Xóa log
- * - getuserLogsByGroupId()→ Logs theo groupId (online users)
- *
- * ═══════════════════════════════════════════════════════════════════
- * HELPER METHODS (Private)
- * ═══════════════════════════════════════════════════════════════════
- * - userDetailPayload()  → Build thông tin chi tiết user (group, privileges, hotline)
- * - insertSIPAccount()   → Tạo/cập nhật tài khoản SIP trên PBX
- * - buildUserWhere()     → Xây dựng WHERE clause cho query users
- * - paginate()           → Tạo response phân trang (format giống Laravel)
- * - throwError()         → Throw HttpException với format chuẩn
  *
  * Tương đương: UsersController.php + UserModel.php trong Laravel
  */
@@ -58,16 +30,22 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 import { createHash, randomBytes } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { Request } from "express";
-import { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { PoolConnection } from "mysql2/promise";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, EntityManager, Not, Brackets, SelectQueryBuilder, Between, In } from "typeorm";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
-import { DatabaseService } from "../../config/database.service";
+import { UserEntity } from "./entities/user.entity";
+import { GroupEntity } from "./entities/group.entity";
+import { UserLogEntity } from "./entities/user-log.entity";
+import {
+  updateUserSchema,
+  addUserAsMemberOfCompanySchema
+} from "./schemas/users.schemas";
 
 /** Type alias cho database row kết quả query */
-type DbRow = RowDataPacket & Record<string, any>;
+type DbRow = Record<string, any>;
 
 /**
  * AuthPayload - Cấu trúc dữ liệu trong JWT token
@@ -187,7 +165,13 @@ const USER_FILTER_TYPES = new Set([
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly database: DatabaseService,
+    @InjectRepository(UserEntity)
+    private readonly userRepository: Repository<UserEntity>,
+    @InjectRepository(GroupEntity)
+    private readonly groupRepository: Repository<GroupEntity>,
+    @InjectRepository(UserLogEntity)
+    private readonly userLogRepository: Repository<UserLogEntity>,
+    private readonly entityManager: EntityManager,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly blacklist: JwtBlacklistService,
@@ -207,6 +191,7 @@ export class UsersService {
         sign_in_time: this.unixNow(),
       });
       await this.handleLoginFail(email, clientIp);
+      throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
     const user = await this.findUserByEmail(email);
@@ -219,6 +204,7 @@ export class UsersService {
         sign_in_time: this.unixNow(),
       });
       await this.handleLoginFail(email, clientIp);
+      throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
     const passwordMatches = await bcrypt.compare(
@@ -234,6 +220,7 @@ export class UsersService {
         sign_in_time: this.unixNow(),
       });
       await this.handleInvalidPassword(email);
+      throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
     if (user.status !== "active") {
@@ -264,21 +251,10 @@ export class UsersService {
       );
     }
 
-    const group = await this.getGroupForLogin(curUser.groupId);
+    const group = curUser.groupId ? await this.getGroupForLogin(curUser.groupId) : null;
     if (!group || group.status === "lock") {
       this.throwLockedAccount();
     }
-
-    // if (this.isUserAlreadyOnline(curUser) && curUser.role !== "superadmin") {
-    //   this.throwError(
-    //     {
-    //       author: "Tài khoản đang được đăng nhập.",
-    //       alias: "Error_Using_Account",
-    //     },
-    //     HttpStatus.NOT_ACCEPTABLE,
-    //     "Error_Pending_Account",
-    //   );
-    // }
 
     const userLog = await this.insertUserLog({
       username: email,
@@ -289,12 +265,10 @@ export class UsersService {
       sign_in_time: this.unixNow(),
     });
 
-    await this.database
-      .pool("main")
-      .execute<ResultSetHeader>(
-        "UPDATE users SET lastLogin = ?, isOnline = 1 WHERE id = ?",
-        [this.nowSql(), curUser.id],
-      );
+    await this.userRepository.update(curUser.id, {
+      lastLogin: this.nowSql(),
+      isOnline: 1,
+    });
 
     const responseUser = this.sanitizeUser({ ...user });
     const [privileges] = await this.processPrivileges(curUser);
@@ -302,7 +276,7 @@ export class UsersService {
       curUser,
       responseUser,
     );
-    const groupHotline = await this.getGroupHotline(curUser.groupId);
+    const groupHotline = curUser.groupId ? await this.getGroupHotline(curUser.groupId) : [];
 
     for (const value of groupHotline) {
       if (value.queue_config && this.isJson(value.queue_config)) {
@@ -351,21 +325,19 @@ export class UsersService {
     }
 
     const logId = Number(body.id);
-    let log: DbRow | undefined;
+    let log: UserLogEntity | null = null;
     if (Number.isFinite(logId) && logId > 0) {
       log = await this.findUserLogById(logId);
     }
 
     const userId = Number(payload.sub ?? payload.id);
-    const userRows =
+    const user =
       Number.isFinite(userId) && userId > 0
-        ? await this.database.query<DbRow[]>(
-            "main",
-            "SELECT id, remember_token FROM users WHERE id = ? LIMIT 1",
-            [userId],
-          )
-        : [];
-    const user = userRows[0];
+        ? await this.userRepository.findOne({
+            select: { id: true, remember_token: true },
+            where: { id: userId },
+          })
+        : null;
 
     if (log) {
       if (user) {
@@ -373,21 +345,17 @@ export class UsersService {
           await this.invalidateStoredToken(String(user.remember_token));
         }
 
-        await this.database
-          .pool("main")
-          .execute<ResultSetHeader>(
-            "UPDATE users SET remember_token = NULL WHERE id = ?",
-            [user.id],
-          );
+        await this.userRepository.update(user.id, {
+          remember_token: null,
+        });
       }
 
-      if (log?.status === "sign-in") {
-        await this.database
-          .pool("main")
-          .execute<ResultSetHeader>(
-            "UPDATE users_log SET status = ?, sign_out_time = ?, updated_at = ? WHERE id = ?",
-            ["sign-out", this.unixNow(), this.nowSql(), logId],
-          );
+      if (log.status === "sign-in") {
+        await this.userLogRepository.update(logId, {
+          status: "sign-out",
+          sign_out_time: this.unixNow(),
+          updated_at: this.nowSql(),
+        });
       }
     }
 
@@ -405,8 +373,6 @@ export class UsersService {
     return { message: "Success", code: 200 };
   }
 
-
-
   async getUsers(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -420,105 +386,75 @@ export class UsersService {
       );
     }
 
-    const where: string[] = ["users.status <> ?"];
-    const params: any[] = ["trash"];
+    const qb = this.userRepository.createQueryBuilder("users")
+      .leftJoin("departments", "departments", "departments.id = users.departmentId")
+      .leftJoin("user_types", "user_types", "user_types.id = users.typeId")
+      .leftJoin("groups", "groups", "groups.id = users.groupId")
+      .leftJoin("qr_code", "qr_code", "qr_code.userId = users.id")
+      .leftJoin("user_config", "user_config", "user_config.userid = users.id");
+
+    qb.where("users.status <> :statusTrash", { statusTrash: "trash" });
 
     if (currentUser?.role !== "superadmin") {
       if (!this.isPhpEmpty(body.groupId)) {
-        where.push("users.groupId = ?");
-        params.push(body.groupId);
+        qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
       } else if (Number(currentUser?.groupId) === 1) {
-        where.push("users.id = ?");
-        params.push(currentUser.id);
+        qb.andWhere("users.id = :currentUserId", { currentUserId: currentUser.id });
       } else if (currentUser?.groupId) {
-        where.push("users.groupId = ?");
-        params.push(currentUser.groupId);
+        qb.andWhere("users.groupId = :currentUserGroupId", { currentUserGroupId: currentUser.groupId });
       }
     } else if (!this.isPhpEmpty(body.groupId)) {
-      where.push("users.groupId = ?");
-      params.push(body.groupId);
+      qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
     }
 
     if (!this.isPhpEmpty(body.departmentId)) {
-      where.push("users.departmentId = ?");
-      params.push(body.departmentId);
+      qb.andWhere("users.departmentId = :departmentId", { departmentId: body.departmentId });
     }
 
     if (!this.isPhpEmpty(body.typeId)) {
-      where.push("users.typeId = ?");
-      params.push(body.typeId);
+      qb.andWhere("users.typeId = :typeId", { typeId: body.typeId });
     }
 
     if (!this.isPhpEmpty(body.roleId)) {
-      where.push("users.role = ?");
-      params.push(body.roleId);
+      qb.andWhere("users.role = :roleId", { roleId: body.roleId });
     }
 
     if (!this.isPhpEmpty(body.search) && !Array.isArray(body.search)) {
       const keyword = `%${String(body.search)}%`;
-      where.push(`(
-        users.firstName LIKE ? OR users.lastName LIKE ? OR users.email LIKE ?
-        OR users.extension LIKE ? OR user_types.name LIKE ? OR users.userCode = ?
-      )`);
-      params.push(
-        keyword,
-        keyword,
-        keyword,
-        keyword,
-        keyword,
-        String(body.search),
-      );
+      qb.andWhere(new Brackets(qbSub => {
+        qbSub.where("users.firstName LIKE :keyword", { keyword })
+          .orWhere("users.lastName LIKE :keyword")
+          .orWhere("users.email LIKE :keyword")
+          .orWhere("users.extension LIKE :keyword")
+          .orWhere("user_types.name LIKE :keyword")
+          .orWhere("users.userCode = :searchVal", { searchVal: String(body.search) });
+      }));
     }
 
-    this.applyUserFilters(body.filters, where, params);
+    this.applyUserFilters(body.filters, qb);
 
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const total = await qb.getCount();
+
     const perPage = this.normalizeLaravelRecordsOnPage(body.recordsOnPage);
     const currentPage = this.normalizePage(body.page ?? 1);
     const offset = (currentPage - 1) * perPage;
-    const orderSql = this.buildUserOrderSql(body.sorts);
-    const usersFromSql = `
-        FROM users
-        LEFT JOIN departments ON departments.id = users.departmentId
-        LEFT JOIN user_types ON user_types.id = users.typeId
-        LEFT JOIN \`groups\` ON \`groups\`.id = users.groupId
-        LEFT JOIN qr_code ON qr_code.userId = users.id
-        LEFT JOIN user_config ON user_config.userid = users.id
-    `;
 
-    const countRows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT COUNT(*) AS total
-        ${usersFromSql}
-        ${whereSql}
-      `,
-      params,
-    );
-    const total = Number(countRows[0]?.total ?? 0);
+    qb.select("users.*")
+      .addSelect("departments.name", "departmentName")
+      .addSelect("user_types.name", "typeName")
+      .addSelect("groups.groupName", "groupName")
+      .addSelect("qr_code.email", "emailqr")
+      .addSelect("(SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users u2 WHERE u2.id = users.created_by)", "created_name")
+      .addSelect("(SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users u2 WHERE u2.id = users.updated_by)", "updated_name")
+      .addSelect("IF(user_config.is_hotdesk = 1, user_config.is_hotdesk, NULL)", "is_hotdesk")
+      .addSelect("IF(user_config.transports IS NOT NULL, user_config.transports, NULL)", "transports")
+      .addSelect("IF(user_config.port IS NOT NULL, user_config.port, NULL)", "port");
 
-    const data = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT
-          users.*,
-          departments.name AS departmentName,
-          user_types.name AS typeName,
-          \`groups\`.groupName,
-          qr_code.email AS emailqr,
-          (SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users AS u2 WHERE u2.id = users.created_by) AS created_name,
-          (SELECT CONCAT_WS(' ', u2.lastName, u2.firstName) FROM users AS u2 WHERE u2.id = users.updated_by) AS updated_name,
-          IF(user_config.is_hotdesk = 1, user_config.is_hotdesk, NULL) AS is_hotdesk,
-          IF(user_config.transports IS NOT NULL, user_config.transports, NULL) AS transports,
-          IF(user_config.port IS NOT NULL, user_config.port, NULL) AS port,
-          users.is_google2fa
-        ${usersFromSql}
-        ${whereSql}
-        ${orderSql}
-        LIMIT ? OFFSET ?
-      `,
-      [...params, perPage, offset],
-    );
+    qb.limit(perPage).offset(offset);
+
+    this.applyUserOrder(qb, body.sorts);
+
+    const data = await qb.getRawMany();
 
     const sanitizedData = data.map((user) => this.sanitizeUser(user));
     return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
@@ -537,8 +473,6 @@ export class UsersService {
     return this.sanitizeUser(user);
   }
 
-
-
   async updateUser(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -546,10 +480,9 @@ export class UsersService {
   ) {
     const userId = Number(body.id);
     const params = this.filteredUpdateUserParams(body);
-    const validationError = await this.validateUpdateUserParams(params, userId);
-    if (validationError) {
-      return validationError;
-    }
+    
+    // Call Zod validation (throws HttpException 406 on failure)
+    await this.validateUpdateUserZod(params, userId);
 
     const user = await this.findRawUserById(userId, true);
     if (!user) {
@@ -557,16 +490,6 @@ export class UsersService {
         { user_id_not_exist: "Id của người dùng không tồn tại." },
         HttpStatus.NOT_ACCEPTABLE,
         "Invalid parameters",
-      );
-    }
-
-    if (
-      user.status !== "active" &&
-      Number(body.groupId) !== 1 &&
-      body.status === "active"
-    ) {
-      await this.assertGroupHasCapacityForUpdate(
-        Number(body.groupId ?? user.groupId),
       );
     }
 
@@ -578,15 +501,12 @@ export class UsersService {
       avatar,
       currentUser?.id,
     );
-    const updateColumns = Array.from(updates.keys()).map((key) => `\`${key}\` = ?`);
-    const updateParams = Array.from(updates.values());
 
-    await this.database
-      .pool("main")
-      .execute<ResultSetHeader>(
-        `UPDATE users SET ${updateColumns.join(", ")} WHERE id = ?`,
-        [...updateParams, userId],
-      );
+    const updateObj: Record<string, any> = {};
+    for (const [key, value] of updates.entries()) {
+      updateObj[key] = value;
+    }
+    await this.userRepository.update(userId, updateObj);
 
     await this.syncJntUserAccessScopes(userId, body);
     await this.upsertUserConfig(userId, body, currentUser?.id);
@@ -608,54 +528,45 @@ export class UsersService {
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
   ) {
-    await this.validateAddMemberOfCompany(body);
-    await this.assertGroupHasCapacity(Number(body.groupId));
+    // Call Zod validation (throws HttpException 406 wrapped in HttpStatus.OK on failure)
+    await this.validateAddMemberOfCompanyZod(body);
 
     const currentUser = await this.getCurrentUser(payload);
     const now = this.nowSql();
-    // Đổi default userCode từ Date.now() → this.unixNow() (giống Laravel dùng time())
     const userCode =
       body.type_user === "midesk"
         ? await this.nextMideskUserCode()
         : String(body.userCode ?? this.unixNow());
 
-    const [result] = await this.database.pool("main").execute<ResultSetHeader>(
-      `
-        INSERT INTO users (
-          firstName,lastName,userCode,status,mobile,phone,email,password,address,note,
-          role,groupId,extension,extensions_view,departmentId,queues,typeId,loginType,
-          created_at,created_by,otherId,otherEmail,firstLogin,is_google2fa
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `,
-      [
-        body.firstName,
-        body.lastName,
-        userCode,
-        body.status ?? "pending",
-        body.mobile ?? "",
-        body.phone ?? "",
-        body.email,
-        await bcrypt.hash(String(body.password), 12),
-        body.address ?? "",
-        body.note ?? "",
-        body.role ?? "agent",
-        body.groupId,
-        body.extension ?? null,
-        body.extensions_view ?? null,
-        body.departmentId ?? null,
-        body.queues ?? null,
-        body.typeId ?? 0,
-        "website",
-        now,
-        currentUser?.id ?? null,
-        body.otherId ?? null,
-        body.otherEmail ?? null,
-        body.firstLogin ? 1 : 0,
-        body.is_google2fa ?? "disabled",
-      ],
-    );
+    const newUser = this.userRepository.create({
+      firstName: body.firstName,
+      lastName: body.lastName,
+      userCode,
+      status: body.status ?? "pending",
+      mobile: body.mobile ?? "",
+      phone: body.phone ?? "",
+      email: body.email,
+      password: await bcrypt.hash(String(body.password), 12),
+      address: body.address ?? "",
+      note: body.note ?? "",
+      role: body.role ?? "agent",
+      groupId: body.groupId,
+      extension: body.extension ?? null,
+      extensions_view: body.extensions_view ?? null,
+      departmentId: body.departmentId ?? null,
+      queues: body.queues ?? null,
+      typeId: body.typeId ?? 0,
+      loginType: "website",
+      created_at: now,
+      created_by: currentUser?.id ?? null,
+      otherId: body.otherId ?? null,
+      otherEmail: body.otherEmail ?? null,
+      firstLogin: body.firstLogin ? 1 : 0,
+      is_google2fa: body.is_google2fa ?? "disabled",
+    });
 
-    const insertedId = result.insertId;
+    const savedUser = await this.userRepository.save(newUser);
+    const insertedId = savedUser.id;
 
     // 1. Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
     await this.syncJntUserAccessScopes(insertedId, body);
@@ -663,7 +574,7 @@ export class UsersService {
     // 2. Insert QRCodeMifone nếu có emailqr
     if (!this.isPhpEmpty(body.emailqr)) {
       if (await this.tableExists("qrcode_mifone")) {
-        await this.database.pool("main").execute<ResultSetHeader>(
+        await this.entityManager.query(
           "INSERT INTO qrcode_mifone (userId, groupId, email) VALUES (?, ?, ?)",
           [insertedId, body.groupId ?? null, String(body.emailqr)],
         );
@@ -673,18 +584,8 @@ export class UsersService {
     // 3. Upload avatar nếu có file
     if (avatar?.buffer) {
       const avatarName = await this.storeUserAvatar(insertedId, avatar);
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          "UPDATE users SET avatar = ? WHERE id = ?",
-          [avatarName, insertedId],
-        );
+      await this.userRepository.update(insertedId, { avatar: avatarName });
     }
-
-    // 4. user_config: Laravel đang comment phần này nên giữ ở dạng comment
-    // if (body.is_hotdesk == 1 || body.transports != null || body.port != null) {
-    //   await this.insertUserConfigForCreatedUser(insertedId, body, currentUser?.id);
-    // }
 
     const insertedUser = await this.findUserById(insertedId, false, true);
     await this.insertUserHistory(
@@ -694,7 +595,7 @@ export class UsersService {
       currentUser,
     );
 
-    // 5. Update departments.extensions nếu có departmentId và extension
+    // 4. Update departments.extensions nếu có departmentId và extension
     await this.updateDepartmentExtension(body);
 
     return {
@@ -703,8 +604,6 @@ export class UsersService {
       },
     };
   }
-
-
 
   private invalidateToken(token: string, exp?: number) {
     this.blacklist.invalidate(token, exp);
@@ -722,9 +621,9 @@ export class UsersService {
     }
   }
 
-  private extractRequestToken(body: Record<string, any>, request: Request) {
-    const bodyToken = body.token ? String(body.token) : undefined;
-    return bodyToken || this.extractBearerToken(request.headers.authorization);
+  private extractBearerToken(authorization?: string): string | undefined {
+    const [type, token] = authorization?.split(" ") ?? [];
+    return type?.toLowerCase() === "bearer" ? token : undefined;
   }
 
   private domainFromReferer(request: Request) {
@@ -746,24 +645,16 @@ export class UsersService {
     return Array.isArray(value) ? value[0] : value;
   }
 
-  private isTokenExpiredError(error: unknown) {
-    return (
-      typeof error === "object" &&
-      error !== null &&
-      "name" in error &&
-      (error as { name?: string }).name === "TokenExpiredError"
-    );
+  private requestUrl(request: Request) {
+    const forwardedProto = this.headerToString(request.headers["x-forwarded-proto"]);
+    const proto = forwardedProto ?? request.protocol ?? "http";
+    const host = request.get("host") ?? "localhost";
+    const path = (request.originalUrl || request.url || "").split("?")[0];
+    return `${proto}://${host}${path}`;
   }
 
-
-
   private async findUserByEmail(email: string) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT * FROM users WHERE email = ? LIMIT 1",
-      [email],
-    );
-    return rows[0];
+    return this.userRepository.findOne({ where: { email } });
   }
 
   private async findUserById(
@@ -775,26 +666,30 @@ export class UsersService {
       return undefined;
     }
 
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT ${USER_SAFE_SELECT}
-        FROM users
-        WHERE id = ? ${includeTrashed ? "" : "AND status <> 'trash'"}
-        LIMIT 1
-      `,
-      [id],
-    );
-    const user = rows[0];
-    if (!user || !includeRelations) {
-      return user;
+    const user = await this.userRepository.findOne({
+      where: {
+        id,
+        ...(includeTrashed ? {} : { status: Not("trash") as any }),
+      },
+    });
+
+    if (!user) {
+      return undefined;
     }
 
-    user.userType = user.typeId ? await this.getUserType(user.typeId) : null;
-    user.userGroup = user.groupId
+    const userObj = { ...user };
+    delete (userObj as any).password;
+    delete (userObj as any).remember_token;
+
+    if (!includeRelations) {
+      return userObj;
+    }
+
+    (userObj as any).userType = user.typeId ? await this.getUserType(user.typeId) : null;
+    (userObj as any).userGroup = user.groupId
       ? await this.getGroupById(user.groupId)
       : null;
-    return user;
+    return userObj;
   }
 
   private async findRawUserById(id: number, includeTrashed = false) {
@@ -802,17 +697,12 @@ export class UsersService {
       return undefined;
     }
 
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT *
-        FROM users
-        WHERE id = ? ${includeTrashed ? "" : "AND status <> 'trash'"}
-        LIMIT 1
-      `,
-      [id],
-    );
-    return rows[0];
+    return (await this.userRepository.findOne({
+      where: {
+        id,
+        ...(includeTrashed ? {} : { status: Not("trash") as any }),
+      },
+    })) ?? undefined;
   }
 
   private async getCurrentUser(payload: AuthPayload | undefined) {
@@ -821,8 +711,7 @@ export class UsersService {
   }
 
   private async getUserType(id: number) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       "SELECT * FROM user_types WHERE id = ? LIMIT 1",
       [id],
     );
@@ -830,26 +719,18 @@ export class UsersService {
   }
 
   private async getGroupById(id: number) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT * FROM `groups` WHERE id = ? LIMIT 1",
-      [id],
-    );
-    return rows[0] ?? null;
+    return (await this.groupRepository.findOne({ where: { id } })) ?? null;
   }
 
   private async getTableColumns(table: "users") {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       `SHOW COLUMNS FROM \`${table}\``,
-      [],
     );
     return rows.map((row) => String(row.Field));
   }
 
   private async tableExists(table: string) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       "SHOW TABLES LIKE ?",
       [table],
     );
@@ -857,23 +738,11 @@ export class UsersService {
   }
 
   private async getGroupForLogin(id: number) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT id,groupName,recording_url,socket_url,limitUser,did,contextout,
-               config_dashboard,secret,config,sms_config,connector_server,status
-        FROM \`groups\`
-        WHERE id = ?
-        LIMIT 1
-      `,
-      [id],
-    );
-    return rows[0] ?? null;
+    return (await this.groupRepository.findOne({ where: { id } })) ?? null;
   }
 
   private async getGroupHotline(groupId: number) {
-    return this.database.query<DbRow[]>(
-      "main",
+    return this.entityManager.query(
       `
         SELECT fixed_number,fixed_provider,hotline_number,hotline_number_price,
                queues,extensions,discount,queue_config
@@ -889,8 +758,7 @@ export class UsersService {
       return [];
     }
 
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       `
         SELECT page, GROUP_CONCAT(action) AS permission
         FROM user_privileges
@@ -938,19 +806,6 @@ export class UsersService {
       .slice(0, 16);
   }
 
-  private requestUrl(request: Request) {
-    const forwardedProto = this.headerToString(request.headers["x-forwarded-proto"]);
-    const proto = forwardedProto ?? request.protocol ?? "http";
-    const host = request.get("host") ?? "localhost";
-    const path = (request.originalUrl || request.url || "").split("?")[0];
-    return `${proto}://${host}${path}`;
-  }
-
-  private isUserAlreadyOnline(user: DbRow | undefined): boolean {
-    if (!user) return false;
-    return Number(user.isOnline) === 1;
-  }
-
   private async processPrivileges(user: DbRow | undefined): Promise<[any[], number, number]> {
     if (!user) {
       return [[], 0, 0];
@@ -981,10 +836,8 @@ export class UsersService {
 
     const queueConfig: Record<string, any> = {};
     if (user.role === "superadmin") {
-      const hotlines = await this.database.query<DbRow[]>(
-        "main",
+      const hotlines = await this.entityManager.query(
         "SELECT queues, extensions, queue_config FROM group_hotline",
-        [],
       );
       const queues: string[] = [];
       const extensions: string[] = [];
@@ -1001,31 +854,27 @@ export class UsersService {
         }
       }
 
-      const userCodesRows = await this.database.query<DbRow[]>(
-        "main",
-        "SELECT userCode FROM users WHERE status <> 'trash'",
-        [],
-      );
+      const userCodesRows = await this.userRepository.find({
+        select: { userCode: true },
+        where: { status: Not("trash") as any },
+      });
       const agentsViewStr = userCodesRows.map(r => r.userCode).filter(Boolean).join(",");
 
       user.queues = queues.join(",");
       user.extensions_view = extensions.join(",");
       user.agents_view = agentsViewStr;
 
-      const agents = await this.database.query<DbRow[]>(
-        "main",
+      const agents = await this.entityManager.query(
         `
           SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
           FROM users
           WHERE status <> 'trash'
         `,
-        [],
       );
 
       return [queueConfig, this.keyBy(agents, "extension")];
     } else {
-      const agents = await this.database.query<DbRow[]>(
-        "main",
+      const agents = await this.entityManager.query(
         `
           SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
           FROM users
@@ -1039,61 +888,37 @@ export class UsersService {
   }
 
   private async insertUserLog(input: Record<string, any>) {
-    const [result] = await this.database.pool("main").execute<ResultSetHeader>(
-      `
-        INSERT INTO users_log
-          (groupid,username,password,ip_address,status,sign_in_time,sign_out_time,created_at,updated_at,userCode)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-      `,
-      [
-        input.groupid ?? null,
-        String(input.username ?? "").slice(0, 50),
-        String(input.password ?? "").slice(0, 50),
-        input.ip_address ?? null,
-        input.status ?? null,
-        input.sign_in_time ?? null,
-        input.sign_out_time ?? null,
-        this.nowSql(),
-        this.nowSql(),
-        input.userCode ?? null,
-      ],
-    );
+    const userLog = this.userLogRepository.create({
+      groupId: input.groupid ?? null,
+      username: String(input.username ?? "").slice(0, 50),
+      password: String(input.password ?? "").slice(0, 50),
+      ip_address: input.ip_address ?? null,
+      status: input.status ?? null,
+      sign_in_time: input.sign_in_time ?? null,
+      sign_out_time: input.sign_out_time ?? null,
+      created_at: this.nowSql(),
+      updated_at: this.nowSql(),
+      userCode: input.userCode ?? null,
+    });
 
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT * FROM users_log WHERE id = ? LIMIT 1",
-      [result.insertId],
-    );
-    const row = rows[0];
-    if (row && row.groupid !== undefined) {
-      row.groupId = row.groupid;
-      delete row.groupid;
-    }
-    return row;
+    const savedLog = await this.userLogRepository.save(userLog);
+    return savedLog;
   }
 
   private async findUserLogById(id: number) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT * FROM users_log WHERE id = ? LIMIT 1",
-      [id],
-    );
-    return rows[0];
+    return this.userLogRepository.findOne({ where: { id } });
   }
 
   private async handleLoginFail(email: string, ip: string): Promise<never> {
-    const countRows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT COUNT(*) AS total
-        FROM users_log
-        WHERE username = ? AND status = 'fail'
-          AND created_at BETWEEN ? AND ?
-      `,
-      [email, this.startOfTodaySql(), this.endOfTodaySql()],
-    );
+    const total = await this.userLogRepository.count({
+      where: {
+        username: email,
+        status: "fail",
+        created_at: Between(this.startOfTodaySql(), this.endOfTodaySql())
+      }
+    });
 
-    if (Number(countRows[0]?.total ?? 0) >= 5) {
+    if (total >= 5) {
       await this.lockIp(ip);
       this.throwError(
         {
@@ -1109,65 +934,51 @@ export class UsersService {
   }
 
   private async handleInvalidPassword(email: string): Promise<never> {
-    const lastRows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT updated_at
-        FROM users_log
-        WHERE username = ? AND status IN ('sign-in','sign-out')
-        ORDER BY id DESC
-        LIMIT 1
-      `,
-      [email],
-    );
+    const lastLog = await this.userLogRepository.findOne({
+      where: {
+        username: email,
+        status: In(["sign-in", "sign-out"])
+      },
+      order: { id: "DESC" }
+    });
 
-    const lastLogin = lastRows[0]?.updated_at ?? this.nowSql();
-    const countRows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT COUNT(*) AS total
-        FROM users_log
-        WHERE username = ? AND status = 'fail'
-          AND created_at BETWEEN ? AND ?
-      `,
-      [email, lastLogin, this.endOfTodaySql()],
-    );
+    const lastLogin = lastLog?.updated_at ?? this.nowSql();
+    const total = await this.userLogRepository.count({
+      where: {
+        username: email,
+        status: "fail",
+        created_at: Between(lastLogin, this.endOfTodaySql())
+      }
+    });
 
-    if (Number(countRows[0]?.total ?? 0) >= 5) {
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          "UPDATE users SET status = 'lock' WHERE email = ? AND status = 'active'",
-          [email],
-        );
+    if (total >= 5) {
+      await this.userRepository.update(
+        { email, status: "active" },
+        { status: "lock" }
+      );
     }
 
     this.throwInvalidAccount();
   }
 
   private async lockIp(ip: string) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       "SELECT id FROM ip_lock WHERE ip_client = ? LIMIT 1",
       [ip],
     );
 
     if (rows[0]) {
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          "UPDATE ip_lock SET lock_time = ? WHERE id = ?",
-          [this.unixNow(), rows[0].id],
-        );
+      await this.entityManager.query(
+        "UPDATE ip_lock SET lock_time = ? WHERE id = ?",
+        [this.unixNow(), rows[0].id],
+      );
       return;
     }
 
-    await this.database
-      .pool("main")
-      .execute<ResultSetHeader>(
-        "INSERT INTO ip_lock (ip_client, lock_time) VALUES (?, ?)",
-        [ip, this.unixNow()],
-      );
+    await this.entityManager.query(
+      "INSERT INTO ip_lock (ip_client, lock_time) VALUES (?, ?)",
+      [ip, this.unixNow()],
+    );
   }
 
   private filteredUpdateUserParams(body: Record<string, any>) {
@@ -1190,98 +1001,122 @@ export class UsersService {
     return params;
   }
 
-  private async validateUpdateUserParams(
-    params: Record<string, any>,
-    userId: number,
-  ) {
-    const errors: Record<string, string> = {};
-
-    if (
-      params.firstName !== undefined &&
-      !this.isBetween(params.firstName, 1, 50)
-    ) {
-      errors.firstName = "Xin nhập từ 1 đến 50 ký tự.";
-    }
-    if (
-      params.lastName !== undefined &&
-      !this.isBetween(params.lastName, 1, 50)
-    ) {
-      errors.lastName = "Xin nhập từ 1 đến 50 ký tự.";
-    }
-    if (params.email !== undefined) {
-      const email = String(params.email);
-      if (!this.isBetween(email, 6, 255) || !this.isEmail(email)) {
-        errors.email = "Xin nhập đúng định dạng email.";
-      } else if (await this.emailExistsForOtherUser(email, userId)) {
-        errors.email = "Đã tồn tại";
-      }
-    }
-    if (
-      params.password !== undefined &&
-      !this.isBetween(params.password, 6, 50)
-    ) {
-      errors.password = "Xin nhập từ 6 đến 50 ký tự.";
-    }
-    if (params.address !== undefined && String(params.address).length > 255) {
-      errors.address = "Xin nhập không quá 255 ký tự.";
-    }
-    if (params.note !== undefined && String(params.note).length > 255) {
-      errors.note = "Xin nhập không quá 255 ký tự.";
-    }
-    if (params.groupId !== undefined) {
-      if (!this.isNumeric(params.groupId)) {
-        errors.groupId = "Xin nhập chữ số.";
-      } else {
-        const group = await this.getGroupById(Number(params.groupId));
-        if (!group || group.status === "trash") {
-          errors.groupId = "Không tồn tại.";
+  private async validateUpdateUserZod(body: any, userId: number) {
+    const schema = updateUserSchema.superRefine(async (data, ctx) => {
+      if (data.email) {
+        const emailExists = await this.userRepository.findOne({
+          where: { email: data.email, status: Not("trash") as any, id: Not(userId) }
+        });
+        if (emailExists) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["email"],
+            message: "Đã tồn tại",
+          });
         }
       }
-    }
-    if (
-      params.status !== undefined &&
-      !["active", "lock", "pending", "trash"].includes(String(params.status))
-    ) {
-      errors.status = "Không nằm trong những thông tin cho phép.";
-    }
-    if (
-      params.role !== undefined &&
-      !["agent", "admin", "superadmin", "supervisor", "manager"].includes(
-        String(params.role),
-      )
-    ) {
-      errors.role = "Không nằm trong những thông tin cho phép.";
-    }
-    if (params.extension !== undefined && String(params.extension).length > 50) {
-      errors.extension = "Xin nhập không quá 50 ký tự.";
-    }
-    if (params.queues !== undefined && String(params.queues).length > 255) {
-      errors.queues = "Xin nhập không quá 255 ký tự.";
-    }
+      if (data.groupId) {
+        const group = await this.groupRepository.findOne({
+          where: { id: Number(data.groupId), status: Not("trash") as any }
+        });
+        if (!group) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["groupId"],
+            message: "Không tồn tại.",
+          });
+        } else {
+          const currentUser = await this.userRepository.findOne({ where: { id: userId } });
+          if (currentUser && currentUser.status !== "active" && data.status === "active") {
+            const totalActive = await this.userRepository.count({
+              where: { groupId: Number(data.groupId), status: "active" }
+            });
+            if (totalActive >= Number(group.limitUser ?? 0)) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["group_full"],
+                message: "Group đã vượt quá số lương thành viên cho phép.",
+              });
+            }
+          }
+        }
+      }
+    });
 
-    if (Object.keys(errors).length === 0) {
-      return undefined;
+    const result = await schema.safeParseAsync(body);
+    if (!result.success) {
+      const errors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        errors[issue.path.join(".")] = issue.message;
+      }
+      throw new HttpException(
+        {
+          code: 406,
+          message: "Invalid parameters",
+          error: { errors },
+        },
+        HttpStatus.NOT_ACCEPTABLE,
+      );
     }
-
-    return {
-      code: 406,
-      message: "Invalid parameters",
-      error: { errors },
-    };
   }
 
-  private async emailExistsForOtherUser(email: string, userId: number) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      `
-        SELECT id
-        FROM users
-        WHERE email = ? AND status <> 'trash' AND id <> ?
-        LIMIT 1
-      `,
-      [email, Number.isFinite(userId) ? userId : 0],
-    );
-    return Boolean(rows[0]);
+  private async validateAddMemberOfCompanyZod(body: any) {
+    const schema = addUserAsMemberOfCompanySchema.superRefine(async (data, ctx) => {
+      if (data.email) {
+        const emailExists = await this.userRepository.findOne({
+          where: { email: data.email, status: Not("trash") as any }
+        });
+        if (emailExists) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["email"],
+            message: "Đã tồn tại",
+          });
+        }
+      }
+      if (data.groupId) {
+        const group = await this.groupRepository.findOne({
+          where: { id: Number(data.groupId), status: Not("trash") as any }
+        });
+        if (!group) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["groupId"],
+            message: "Không tồn tại.",
+          });
+        } else {
+          const totalActive = await this.userRepository.count({
+            where: { groupId: Number(data.groupId), status: "active" }
+          });
+          if (
+            Number(group.limitUser ?? 0) > 0 &&
+            totalActive >= Number(group.limitUser)
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["group_full"],
+              message: "Group đã vượt quá số lượng thành viên cho phép.",
+            });
+          }
+        }
+      }
+    });
+
+    const result = await schema.safeParseAsync(body);
+    if (!result.success) {
+      const errors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        errors[issue.path.join(".")] = issue.message;
+      }
+      throw new HttpException(
+        {
+          code: 406,
+          message: "Invalid parameters",
+          error: { errors },
+        },
+        HttpStatus.OK,
+      );
+    }
   }
 
   private async buildLaravelUpdateUserColumns(
@@ -1393,285 +1228,18 @@ export class UsersService {
     return name;
   }
 
-  private async validateUpdateUser(body: Record<string, any>, current: DbRow) {
-    if (
-      body.firstName !== undefined &&
-      !this.isBetween(body.firstName, 1, 50)
-    ) {
-      this.throwValidation({ firstName: "Xin nhập từ 1 đến 50 ký tự." });
-    }
-    if (body.lastName !== undefined && !this.isBetween(body.lastName, 1, 50)) {
-      this.throwValidation({ lastName: "Xin nhập từ 1 đến 50 ký tự." });
-    }
-    if (body.email !== undefined) {
-      const email = String(body.email);
-      if (!this.isBetween(email, 6, 255) || !this.isEmail(email)) {
-        this.throwValidation({ email: "Email không hợp lệ." });
-      }
-      await this.assertEmailIsAvailable(email, Number(current.id));
-    }
-    if (body.password !== undefined && !this.isBetween(body.password, 6, 50)) {
-      this.throwValidation({ password: "Xin nhập từ 6 đến 50 ký tự." });
-    }
-    if (body.groupId !== undefined) {
-      const group = await this.getGroupById(Number(body.groupId));
-      if (!group || group.status === "trash") {
-        this.throwValidation({ groupId: "Group không tồn tại." });
-      }
-    }
-    if (
-      body.status !== undefined &&
-      !["active", "lock", "pending", "trash"].includes(String(body.status))
-    ) {
-      this.throwValidation({ status: "Trạng thái không hợp lệ." });
-    }
-    if (
-      body.role !== undefined &&
-      !["agent", "admin", "superadmin", "supervisor", "manager"].includes(
-        String(body.role),
-      )
-    ) {
-      this.throwValidation({ role: "Role không hợp lệ." });
-    }
-  }
-
-  private validateCreateMember(body: Record<string, any>) {
-    const errors: Record<string, string> = {};
-    if (!this.isBetween(body.firstName, 1, 50))
-      errors.firstName = "Thông tin này là bắt buộc.";
-    if (!this.isBetween(body.lastName, 1, 50))
-      errors.lastName = "Thông tin này là bắt buộc.";
-    if (
-      !this.isBetween(body.email, 6, 255) ||
-      !this.isEmail(String(body.email ?? ""))
-    ) {
-      errors.email = "Email không hợp lệ.";
-    }
-    if (!this.isBetween(body.password, 6, 32))
-      errors.password = "Xin nhập từ 6 đến 32 ký tự.";
-    if (!body.confirmPassword || body.confirmPassword !== body.password) {
-      errors.confirmPassword = "Mật khẩu xác nhận không trùng với mật khẩu.";
-    }
-    if (!Number.isFinite(Number(body.groupId)))
-      errors.groupId = "Group không hợp lệ.";
-    if (
-      body.role &&
-      !["agent", "manager", "supervisor", "admin", "superadmin"].includes(
-        String(body.role),
-      )
-    ) {
-      errors.role = "Role không hợp lệ.";
-    }
-    // address max:255
-    if (body.address !== undefined && body.address !== null && body.address !== "") {
-      if (String(body.address).length > 255) {
-        errors.address = "Địa chỉ không được vượt quá 255 ký tự.";
-      }
-    }
-    // note max:255
-    if (body.note !== undefined && body.note !== null && body.note !== "") {
-      if (String(body.note).length > 255) {
-        errors.note = "Ghi chú không được vượt quá 255 ký tự.";
-      }
-    }
-    // status in:active,lock,pending,trash
-    if (
-      body.status &&
-      !["active", "lock", "pending", "trash"].includes(String(body.status))
-    ) {
-      errors.status = "Trạng thái không hợp lệ.";
-    }
-
-    if (Object.keys(errors).length) {
-      throw new HttpException(
-        { code: 406, message: "Invalid parameters", error: { errors } },
-        HttpStatus.NOT_ACCEPTABLE,
-      );
-    }
-  }
-
-  private async validateAddMemberOfCompany(body: Record<string, any>) {
-    const errors: Record<string, string> = {};
-
-    // 1. Validate firstName
-    if (body.firstName === undefined || body.firstName === null || String(body.firstName).trim() === "") {
-      errors.firstName = "Thông tin này là bắt buộc.";
-    } else if (String(body.firstName).length > 50) {
-      errors.firstName = "Xin nhập không quá 50 ký tự.";
-    }
-
-    // 2. Validate lastName
-    if (body.lastName === undefined || body.lastName === null || String(body.lastName).trim() === "") {
-      errors.lastName = "Thông tin này là bắt buộc.";
-    } else if (String(body.lastName).length > 50) {
-      errors.lastName = "Xin nhập không quá 50 ký tự.";
-    }
-
-    // 3. Validate email
-    const email = String(body.email ?? "").trim();
-    if (body.email === undefined || body.email === null || email === "") {
-      errors.email = "Thông tin này là bắt buộc.";
-    } else if (email.length < 6 || email.length > 255) {
-      errors.email = "Xin nhập từ 6 đến 255 ký tự.";
-    } else if (!this.isEmail(email)) {
-      errors.email = "Xin nhập đúng định dạng email.";
-    } else {
-      // Check email unique in database
-      const rows = await this.database.query<DbRow[]>(
-        "main",
-        "SELECT id FROM users WHERE email = ? AND status <> 'trash' LIMIT 1",
-        [email],
-      );
-      if (rows[0]) {
-        errors.email = "Đã tồn tại";
-      }
-    }
-
-    // 4. Validate password
-    const password = String(body.password ?? "");
-    if (body.password === undefined || body.password === null || password === "") {
-      errors.password = "Thông tin này là bắt buộc.";
-    } else if (password.length < 6 || password.length > 32) {
-      errors.password = "Xin nhập từ 6 đến 32 ký tự.";
-    }
-
-    // 5. Validate confirmPassword
-    if (body.confirmPassword === undefined || body.confirmPassword === null || String(body.confirmPassword) === "") {
-      errors.confirmPassword = "Thông tin này là bắt buộc.";
-    } else if (body.confirmPassword !== body.password) {
-      errors.confirmPassword = "Mật khẩu xác nhận không đúng.";
-    }
-
-    // 6. Validate groupId
-    if (body.groupId === undefined || body.groupId === null || String(body.groupId).trim() === "") {
-      errors.groupId = "Thông tin này là bắt buộc.";
-    } else if (isNaN(Number(body.groupId))) {
-      errors.groupId = "Xin nhập chữ số.";
-    } else {
-      // Check group exists and is active in database
-      const groupRows = await this.database.query<DbRow[]>(
-        "main",
-        "SELECT id, status FROM `groups` WHERE id = ? LIMIT 1",
-        [Number(body.groupId)],
-      );
-      const group = groupRows[0];
-      if (!group || group.status === "trash") {
-        errors.groupId = "Không tồn tại.";
-      }
-    }
-
-    // 7. Validate address
-    if (body.address !== undefined && body.address !== null && String(body.address) !== "") {
-      if (String(body.address).length > 255) {
-        errors.address = "Xin nhập không quá 255 ký tự.";
-      }
-    }
-
-    // 8. Validate note
-    if (body.note !== undefined && body.note !== null && String(body.note) !== "") {
-      if (String(body.note).length > 255) {
-        errors.note = "Xin nhập không quá 255 ký tự.";
-      }
-    }
-
-    // 9. Validate status
-    if (body.status !== undefined && body.status !== null && String(body.status) !== "") {
-      if (!["active", "lock", "pending", "trash"].includes(String(body.status))) {
-        errors.status = "Không nằm trong những thông tin cho phép.";
-      }
-    }
-
-    // 10. Validate role
-    if (body.role !== undefined && body.role !== null && String(body.role) !== "") {
-      if (!["agent", "manager", "supervisor", "admin", "superadmin"].includes(String(body.role))) {
-        errors.role = "Không nằm trong những thông tin cho phép.";
-      }
-    }
-
-    // Throw if there are errors
-    if (Object.keys(errors).length > 0) {
-      throw new HttpException(
-        {
-          code: 406,
-          message: "Invalid parameters",
-          error: {
-            errors,
-          },
-        },
-        HttpStatus.OK,
-      );
-    }
-  }
-
-  private async assertEmailIsAvailable(email: string, excludeUserId?: number) {
-    const params: any[] = [email];
-    let sql = "SELECT id FROM users WHERE email = ? AND status <> 'trash'";
-    if (excludeUserId) {
-      sql += " AND id <> ?";
-      params.push(excludeUserId);
-    }
-    sql += " LIMIT 1";
-
-    const rows = await this.database.query<DbRow[]>("main", sql, params);
-    if (rows[0]) {
-      this.throwValidation({ email: "Đã tồn tại." });
-    }
-  }
-
-  private async assertGroupHasCapacity(groupId: number) {
-    const group = await this.getGroupById(groupId);
-    if (!group) {
-      this.throwValidation({ groupId: "Group không tồn tại." });
-    }
-
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT COUNT(*) AS total FROM users WHERE groupId = ? AND status = 'active'",
-      [groupId],
-    );
-
-    if (
-      Number(group.limitUser ?? 0) > 0 &&
-      Number(rows[0]?.total ?? 0) >= Number(group.limitUser)
-    ) {
-      this.throwError(
-        { group_full: "Group đã vượt quá số lượng thành viên cho phép." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Invalid parameters",
-      );
-    }
-  }
-
-  private async assertGroupHasCapacityForUpdate(groupId: number) {
-    const group = await this.getGroupById(groupId);
-    const rows = await this.database.query<DbRow[]>(
-      "main",
-      "SELECT COUNT(*) AS total FROM users WHERE groupId = ? AND status = 'active'",
-      [groupId],
-    );
-
-    if (Number(rows[0]?.total ?? 0) >= Number(group?.limitUser ?? 0)) {
-      this.throwError(
-        { group_full: "Group đã vượt quá số lương thành viên cho phép." },
-        HttpStatus.NOT_ACCEPTABLE,
-        "Group_Full",
-      );
-    }
-  }
-
   private async upsertUserConfig(
     userId: number,
     body: Record<string, any>,
     currentUserId?: number,
   ) {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       "SELECT userid FROM user_config WHERE userid = ? LIMIT 1",
       [userId],
     );
 
     if (rows[0]) {
-      await this.database.pool("main").execute<ResultSetHeader>(
+      await this.entityManager.query(
         `
           UPDATE user_config
           SET is_hotdesk = ?, updated_by = ?, transports = ?, port = ?
@@ -1696,7 +1264,7 @@ export class UsersService {
     body: Record<string, any>,
     currentUserId?: number,
   ) {
-    await this.database.pool("main").execute<ResultSetHeader>(
+    await this.entityManager.query(
       `
         INSERT INTO user_config
           (userid,groupid,is_hotdesk,transports,port,time_start_auto_resume,created_at,created_by)
@@ -1730,20 +1298,16 @@ export class UsersService {
     };
 
     for (const [type, rawIds] of Object.entries(scopes)) {
-      await this.database
-        .pool("main")
-        .execute<ResultSetHeader>(
-          "DELETE FROM jnt_user_access_scopes WHERE user_id = ? AND scope_type = ?",
-          [userId, type],
-        );
+      await this.entityManager.query(
+        "DELETE FROM jnt_user_access_scopes WHERE user_id = ? AND scope_type = ?",
+        [userId, type],
+      );
 
       for (const scopeId of this.normalizeScopeIds(rawIds)) {
-        await this.database
-          .pool("main")
-          .execute<ResultSetHeader>(
-            "INSERT INTO jnt_user_access_scopes (user_id, scope_type, scope_id) VALUES (?, ?, ?)",
-            [userId, type, scopeId],
-          );
+        await this.entityManager.query(
+          "INSERT INTO jnt_user_access_scopes (user_id, scope_type, scope_id) VALUES (?, ?, ?)",
+          [userId, type, scopeId],
+        );
       }
     }
   }
@@ -1760,7 +1324,7 @@ export class UsersService {
 
     const extension = String(body.extension);
     const newExt = JSON.stringify(extension);
-    await this.database.pool("main").execute<ResultSetHeader>(
+    await this.entityManager.query(
       `
         UPDATE departments
         SET extensions = REPLACE(REPLACE(REPLACE(REPLACE(extensions, ?, ''), ',,', ','), '[,', '['), ',]', ']')
@@ -1769,8 +1333,7 @@ export class UsersService {
       [newExt, `%${newExt}%`],
     );
 
-    const departments = await this.database.query<DbRow[]>(
-      "main",
+    const departments = await this.entityManager.query(
       "SELECT id, extensions FROM departments WHERE id = ? LIMIT 1",
       [body.departmentId],
     );
@@ -1793,12 +1356,10 @@ export class UsersService {
       extensions.push(extension);
     }
 
-    await this.database
-      .pool("main")
-      .execute<ResultSetHeader>(
-        "UPDATE departments SET extensions = ? WHERE id = ?",
-        [JSON.stringify(extensions), department.id],
-      );
+    await this.entityManager.query(
+      "UPDATE departments SET extensions = ? WHERE id = ?",
+      [JSON.stringify(extensions), department.id],
+    );
   }
 
   private async insertUpdateUserHistory(
@@ -1832,7 +1393,7 @@ export class UsersService {
       `${currentUser.lastName ?? ""} ${currentUser.firstName ?? ""}`.trim();
     const historyText = `<b>${fullname}</b> đã cập nhật <i>${text.join(",")}</i> cho tài khoản: <b>${newUser.email}</b>`;
 
-    await this.database.pool("main").execute<ResultSetHeader>(
+    await this.entityManager.query(
       `
         INSERT INTO data_history (action,action_type,data_change,created_by,groupId,text)
         VALUES (?,?,?,?,?,?)
@@ -1869,7 +1430,7 @@ export class UsersService {
         ? JSON.stringify(this.diffUsers(oldUser, newUser))
         : null;
 
-    await this.database.pool("main").execute<ResultSetHeader>(
+    await this.entityManager.query(
       `
         INSERT INTO data_history (action,action_type,data_change,created_by,groupId,text)
         VALUES (?,?,?,?,?,?)
@@ -1898,22 +1459,20 @@ export class UsersService {
   }
 
   private async nextMideskUserCode() {
-    const rows = await this.database.query<DbRow[]>(
-      "main",
+    const rows = await this.entityManager.query(
       `
         SELECT CONCAT('0', (CAST(userCode AS UNSIGNED) + 1)) AS userCode
         FROM users
         WHERE LENGTH(userCode) = 5
         ORDER BY id DESC
         LIMIT 1
-      `,
-      [],
+      `
     );
 
     return rows[0]?.userCode ?? String(Date.now());
   }
 
-  private signUserToken(user: DbRow, remember: boolean, request?: Request) {
+  private signUserToken(user: any, remember: boolean, request?: Request) {
     const issuedAt = this.unixNow();
     const ttlMinutes = Number(this.config.get<string>("JWT_TTL", "60"));
     const expiresAt = remember
@@ -1955,8 +1514,7 @@ export class UsersService {
 
   private applyUserFilters(
     filters: unknown,
-    where: string[],
-    params: any[],
+    qb: SelectQueryBuilder<any>
   ) {
     if (
       !filters ||
@@ -1967,6 +1525,7 @@ export class UsersService {
       return;
     }
 
+    let filterCount = 0;
     for (const [column, rawFilter] of Object.entries(
       filters as Record<string, any>,
     )) {
@@ -1984,63 +1543,55 @@ export class UsersService {
         continue;
       }
 
+      filterCount++;
+      const paramName = `filter_${column}_${filterCount}`;
       const columnSql = `users.\`${column}\``;
       switch (type) {
         case "like":
-          where.push(`${columnSql} LIKE ?`);
-          params.push(`%${keyword}%`);
+          qb.andWhere(`${columnSql} LIKE :${paramName}`, { [paramName]: `%${keyword}%` });
           break;
         case "like_left":
-          where.push(`${columnSql} LIKE ?`);
-          params.push(`%${keyword}`);
+          qb.andWhere(`${columnSql} LIKE :${paramName}`, { [paramName]: `%${keyword}` });
           break;
         case "like_right":
-          where.push(`${columnSql} LIKE ?`);
-          params.push(`${keyword}%`);
+          qb.andWhere(`${columnSql} LIKE :${paramName}`, { [paramName]: `${keyword}%` });
           break;
         case "not_like":
-          where.push(`${columnSql} NOT LIKE ?`);
-          params.push(`%${keyword}%`);
+          qb.andWhere(`${columnSql} NOT LIKE :${paramName}`, { [paramName]: `%${keyword}%` });
           break;
         case "not_like_left":
-          where.push(`${columnSql} NOT LIKE ?`);
-          params.push(`%${keyword}`);
+          qb.andWhere(`${columnSql} NOT LIKE :${paramName}`, { [paramName]: `%${keyword}` });
           break;
         case "not_like_right":
-          where.push(`${columnSql} NOT LIKE ?`);
-          params.push(`${keyword}%`);
+          qb.andWhere(`${columnSql} NOT LIKE :${paramName}`, { [paramName]: `${keyword}%` });
           break;
         case "more":
-          where.push(`${columnSql} > ?`);
-          params.push(keyword);
+          qb.andWhere(`${columnSql} > :${paramName}`, { [paramName]: keyword });
           break;
         case "less":
-          where.push(`${columnSql} < ?`);
-          params.push(keyword);
+          qb.andWhere(`${columnSql} < :${paramName}`, { [paramName]: keyword });
           break;
         case "other":
-          where.push(`${columnSql} <> ?`);
-          params.push(keyword);
+          qb.andWhere(`${columnSql} <> :${paramName}`, { [paramName]: keyword });
           break;
         case "more_equal":
-          where.push(`${columnSql} >= ?`);
-          params.push(keyword);
+          qb.andWhere(`${columnSql} >= :${paramName}`, { [paramName]: keyword });
           break;
         case "more_less":
-          where.push(`${columnSql} <= ?`);
-          params.push(keyword);
+          qb.andWhere(`${columnSql} <= :${paramName}`, { [paramName]: keyword });
           break;
       }
     }
   }
 
-  private buildUserOrderSql(sorts: unknown) {
+  private applyUserOrder(qb: SelectQueryBuilder<any>, sorts: unknown) {
     if (
       !sorts ||
       typeof sorts !== "object" ||
       (Array.isArray(sorts) && sorts.length === 0)
     ) {
-      return "ORDER BY users.id DESC";
+      qb.orderBy("users.id", "DESC");
+      return;
     }
 
     const entries = Array.isArray(sorts)
@@ -2050,47 +1601,32 @@ export class UsersService {
         ])
       : Object.entries(sorts as Record<string, unknown>);
 
-    const order = entries
-      .map(([name, rawDirection]) => {
-        if (!USER_TABLE_COLUMNS.has(name)) {
-          return undefined;
-        }
-        const direction =
-          String(rawDirection ?? "").toLowerCase() === "desc"
-            ? "DESC"
-            : String(rawDirection ?? "").toLowerCase() === "asc"
-              ? "ASC"
-              : undefined;
-        if (!direction) {
-          return undefined;
-        }
-        return `users.\`${name}\` ${direction}`;
-      })
-      .filter(Boolean);
+    let isFirst = true;
+    for (const [name, rawDirection] of entries) {
+      if (!USER_TABLE_COLUMNS.has(name)) {
+        continue;
+      }
+      const direction =
+        String(rawDirection ?? "").toLowerCase() === "desc"
+          ? "DESC"
+          : String(rawDirection ?? "").toLowerCase() === "asc"
+            ? "ASC"
+            : undefined;
+      if (!direction) {
+        continue;
+      }
 
-    return order.length ? `ORDER BY ${order.join(", ")}` : "";
-  }
-
-  private buildUserLogOrderSql(sort: unknown) {
-    if (!sort || typeof sort !== "object" || Array.isArray(sort)) {
-      return "ORDER BY users_log.id DESC";
+      if (isFirst) {
+        qb.orderBy(`users.${name}`, direction);
+        isFirst = false;
+      } else {
+        qb.addOrderBy(`users.${name}`, direction);
+      }
     }
 
-    const [field, value] =
-      Object.entries(sort as Record<string, unknown>)[0] ?? [];
-    const columns: Record<string, string> = {
-      username: "users_log.username",
-      groupName: "groups.groupName",
-      ip_address: "users_log.ip_address",
-      status: "users_log.status",
-      created_at: "users_log.created_at",
-    };
-    const column = columns[field];
-    if (!column) {
-      return "ORDER BY users_log.id DESC";
+    if (isFirst) {
+      qb.orderBy("users.id", "DESC");
     }
-
-    return `ORDER BY ${column} ${String(value) === "1" ? "ASC" : "DESC"}`;
   }
 
   private paginateLaravel(
@@ -2181,30 +1717,6 @@ export class UsersService {
     return `${protocol}://${host}${request.originalUrl.split("?")[0]}`;
   }
 
-  private paginate(
-    data: DbRow[],
-    total: number,
-    perPage: number,
-    currentPage: number,
-  ) {
-    const lastPage = Math.max(Math.ceil(total / perPage), 1);
-    return {
-      current_page: currentPage,
-      data,
-      first_page_url: null,
-      from: total === 0 ? null : (currentPage - 1) * perPage + 1,
-      last_page: lastPage,
-      last_page_url: null,
-      links: [],
-      next_page_url: currentPage < lastPage ? null : null,
-      path: null,
-      per_page: perPage,
-      prev_page_url: currentPage > 1 ? null : null,
-      to: total === 0 ? null : (currentPage - 1) * perPage + data.length,
-      total,
-    };
-  }
-
   private normalizePage(value: unknown) {
     const page = Number(value);
     return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -2230,13 +1742,6 @@ export class UsersService {
     );
   }
 
-  private normalizePageSize(value: unknown) {
-    const size = Number(value);
-    return Number.isFinite(size) && size > 0
-      ? Math.min(Math.floor(size), 500)
-      : 10;
-  }
-
   private isPhpEmpty(value: unknown) {
     if (value === undefined || value === null || value === false) {
       return true;
@@ -2251,17 +1756,8 @@ export class UsersService {
     return value === undefined || value === null || value === "";
   }
 
-  private isNumeric(value: unknown) {
-    return value !== "" && Number.isFinite(Number(value));
-  }
-
   private normalizeBcryptHash(hash: string) {
     return hash?.startsWith("$2y$") ? `$2b$${hash.slice(4)}` : hash;
-  }
-
-  private extractBearerToken(authorization?: string): string | undefined {
-    const [type, token] = authorization?.split(" ") ?? [];
-    return type?.toLowerCase() === "bearer" ? token : undefined;
   }
 
   private getClientIp(request: Request) {
@@ -2305,10 +1801,6 @@ export class UsersService {
     );
   }
 
-  private throwValidation(errors: Record<string, string>): never {
-    this.throwError(errors, HttpStatus.NOT_ACCEPTABLE, "Invalid parameters");
-  }
-
   private throwError(
     errors: Record<string, any>,
     code: number,
@@ -2324,46 +1816,6 @@ export class UsersService {
       },
       code,
     );
-  }
-
-  private isBetween(value: unknown, min: number, max: number) {
-    const text = String(value ?? "");
-    return text.length >= min && text.length <= max;
-  }
-
-  private isEmail(value: string) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  }
-
-  private emptyStringToNullFor(key: string, value: unknown) {
-    if (
-      [
-        "extension",
-        "extensions_view",
-        "queues",
-        "otherId",
-        "otherEmail",
-        "is_google2fa",
-      ].includes(key)
-    ) {
-      return value === "" ? null : value;
-    }
-    return value;
-  }
-
-  private parseJsonObject(value: unknown) {
-    if (!value || typeof value !== "string") {
-      return {};
-    }
-
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed
-        : {};
-    } catch {
-      return {};
-    }
   }
 
   private keyBy(rows: DbRow[], key: string) {
@@ -2395,22 +1847,8 @@ export class UsersService {
     return this.toSqlDateTime(date);
   }
 
-  private formatDateTime(date: Date) {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
-
   private toSqlDateTime(date: Date) {
     const pad = (value: number) => String(value).padStart(2, "0");
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
-
-  private fromUnix(value: unknown) {
-    const timestamp = Number(value);
-    if (!Number.isFinite(timestamp) || timestamp <= 0) {
-      return "";
-    }
-
-    return this.toSqlDateTime(new Date(timestamp * 1000));
   }
 }
