@@ -13,9 +13,11 @@
  */
 
 import { Module } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
+import { ConfigModule, ConfigService } from "@nestjs/config";
+import { TypeOrmModule } from "@nestjs/typeorm";
 import { CommonModule } from "./common/common.module";
 import { DatabaseModule } from "./config/database.module";
+import { createMysqlTypeOrmOptions } from "./config/typeorm.options";
 import { AuthModule } from "./modules/auth/auth.module";
 import { CdrModule } from "./modules/cdr/cdr.module";
 import { ConnectorModule } from "./modules/connector/connector.module";
@@ -60,6 +62,55 @@ import { AppController } from "./app.controller";
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env.local", ".env"],
+    }),
+
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        createMysqlTypeOrmOptions(config, {
+          host: "DB_HOST",
+          port: "DB_PORT",
+          database: "DB_DATABASE",
+          username: "DB_USERNAME",
+          password: "DB_PASSWORD",
+        }),
+    }),
+
+    TypeOrmModule.forRootAsync({
+      name: "voice",
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        createMysqlTypeOrmOptions(
+          config,
+          {
+            host: "DB_HOST_VOICE",
+            port: "DB_PORT_VOICE",
+            database: "DB_DATABASE_VOICE",
+            username: "DB_USERNAME_VOICE",
+            password: "DB_PASSWORD_VOICE",
+          },
+          "voice",
+        ),
+    }),
+
+    TypeOrmModule.forRootAsync({
+      name: "pbx",
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        createMysqlTypeOrmOptions(
+          config,
+          {
+            host: "DB_HOST_PBX",
+            port: "DB_PORT_PBX",
+            database: "DB_DATABASE_PBX",
+            username: "DB_USERNAME_PBX",
+            password: "DB_PASSWORD_PBX",
+          },
+          "pbx",
+        ),
     }),
 
     // Module chung: chứa JWT config, guards, helper services

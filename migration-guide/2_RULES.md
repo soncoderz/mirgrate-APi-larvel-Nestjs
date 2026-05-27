@@ -1,5 +1,13 @@
 # Quy tắc vàng khi Migration (Rules)
 
+## 0. Quyết định kiến trúc mới từ 2026-05-27
+- **Không còn bắt buộc giữ response JSON/HTTP status giống Laravel 100%**. Laravel chỉ còn là baseline để so sánh nghiệp vụ đúng/sai, dữ liệu tạo/sửa/xóa đúng hay không, và các side effect DB chính.
+- **Route và request contract vẫn ưu tiên giữ ổn định** để frontend/Postman hiện tại không phải đổi quá nhiều, nhưng response/error mới được phép theo chuẩn NestJS.
+- **Database access mới phải dùng TypeORM** với `synchronize: false`. `DatabaseService`/`mysql2` chỉ được giữ tạm cho endpoint legacy chưa refactor hoặc query báo cáo quá phức tạp cần chuyển từng bước.
+- **Validation mới phải dùng Zod** qua `ZodValidationPipe`. Không tạo thêm DTO `class-validator` cho endpoint mới/refactor.
+- **Exception/response mới theo chuẩn NestJS**: dùng `BadRequestException`, `NotFoundException`, `ConflictException`, `UnauthorizedException`, `Created`, `Ok`... thay vì trả helper body kiểu Laravel, trừ endpoint legacy chưa refactor.
+- **Thông báo mới phải dùng tiếng Việt có dấu**. Nếu endpoint legacy còn message cũ thì sẽ đổi khi endpoint đó được refactor sang Zod/NestJS chuẩn.
+
 Trong suốt quá trình migration, bạn cần tuân thủ nghiêm ngặt các quy tắc dưới đây để đảm bảo hệ thống NestJS hoạt động đồng bộ và thay thế hoàn hảo cho Laravel:
 
 ## 1. Tính tương thích giao diện API (API Compatibility)

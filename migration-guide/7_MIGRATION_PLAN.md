@@ -13,9 +13,11 @@ Ke hoach tong the cho tat ca active routes nam o
 | Target code chinh | `D:\Thuc Tap\PHP\mirgrate-APi-larvel-Nestjs` |
 | Cach tao code | Scaffold NestJS app moi trong target project khi bat dau code |
 | Repo reference | `mirgrate-APi-larvel-Nestjs-codex` chi dung de tham khao, khong phai source of truth |
-| API compatibility | Giu 100% method, route, request body, response JSON, HTTP status giong Laravel |
+| API compatibility | Tu 2026-05-27: giu route/request on dinh, nhung response/error theo chuan NestJS; Laravel chi lam baseline nghiep vu dung/sai |
 | JWT compatibility | Bat buoc dung chung `JWT_SECRET` va `JWT_ALGO` voi Laravel |
-| Migration style | Lam tung endpoint that chac, khong scaffold hang loat roi bo logic |
+| Migration style | Lam tung endpoint that chac, refactor sang TypeORM + Zod, khong scaffold hang loat roi bo logic |
+| Database layer | TypeORM la chuan moi; `DatabaseService` chi la bridge tam cho endpoint legacy |
+| Validation | Zod la chuan moi; khong dung them DTO `class-validator` |
 | Phase dau tien | `Auth/User` |
 | Export/import | De sau Phase 1 |
 | Postman | Postman collection la acceptance source khi duoc dat vao workspace |

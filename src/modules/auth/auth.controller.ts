@@ -36,9 +36,17 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Request, Response } from "express";
+import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { UsersService } from "../users/users.service";
 import { AuthService } from "./auth.service";
-import { LoginDto } from "./dto/login.dto";
+import {
+  AddUserAsCompanyBody,
+  LoginBody,
+  LogoutBody,
+  addUserAsCompanySchema,
+  loginSchema,
+  logoutSchema,
+} from "./schemas/auth.schemas";
 
 @Controller("v1")
 export class AuthController {
@@ -143,10 +151,10 @@ export class AuthController {
    * POST /api/v1/login
    * Đăng nhập - route chính của ứng dụng
    *
-   * Validate body bằng LoginDto (email + password bắt buộc).
+   * Validate body bằng Zod schema (email + password bắt buộc).
    * Trả về: token, thông tin user, group, quyền hạn, ...
    *
-   * @param body - LoginDto { email: string, password: string, remember_token?: any }
+   * @param body - { email: string, password: string, remember_token?: any }
    * @param request - Express Request (để lấy IP client)
    * @returns { success: { token, user, group, privilege, ... } }
    *
@@ -154,7 +162,10 @@ export class AuthController {
    */
   @Post("login")
   @HttpCode(200)
-  login(@Body() body: LoginDto, @Req() request: Request) {
+  login(
+    @Body(new ZodValidationPipe(loginSchema)) body: LoginBody,
+    @Req() request: Request,
+  ) {
     return this.users.login(body, request);
   }
 
@@ -193,7 +204,10 @@ export class AuthController {
    */
   @Post("logout")
   @HttpCode(200)
-  logout(@Body() body: Record<string, unknown>, @Req() request: Request) {
+  logout(
+    @Body(new ZodValidationPipe(logoutSchema)) body: LogoutBody,
+    @Req() request: Request,
+  ) {
     return this.users.logout(body, request);
   }
 
@@ -209,13 +223,17 @@ export class AuthController {
   @Post("addUserAsCompany")
   @UseInterceptors(FileInterceptor("avatar"))
   addUserAsCompany(
-    @Body() body: Record<string, unknown>,
+    @Body(new ZodValidationPipe(addUserAsCompanySchema))
+    body: AddUserAsCompanyBody,
     @UploadedFile() avatar: any,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const result = this.users.addUserAsCompany(body, avatar);
+    const result = this.users.addUserAsCompany(body, avatar, request);
     return Promise.resolve(result).then((data) => {
-      response.status(data && "success" in data ? 201 : 200);
+      response.status(
+        data && typeof data === "object" && "success" in data ? 201 : 200,
+      );
       return data;
     });
   }
@@ -259,9 +277,9 @@ export class AuthController {
    * Phiên bản đăng nhập v2 - CHƯA MIGRATE
    *
    * Logic Laravel gốc: UsersController@loginv3
-   */
+  */
   @Post("loginv2")
-  loginv2(@Body() body: LoginDto) {
+  loginv2(@Body() body: Record<string, unknown>) {
     return this.auth.notMigrated("loginv3", "POST", "/api/v1/loginv2", body);
   }
 

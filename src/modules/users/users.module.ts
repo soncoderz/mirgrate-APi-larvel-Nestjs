@@ -15,13 +15,21 @@
  */
 
 import { Module } from "@nestjs/common";
+import { TypeOrmModule } from "@nestjs/typeorm";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../config/database.module";
+import { GroupEntity } from "./entities/group.entity";
+import { UserLogEntity } from "./entities/user-log.entity";
+import { UserEntity } from "./entities/user.entity";
 import { UsersController } from "./users.controller";
 import { UsersService } from "./users.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule],
+  imports: [
+    CommonModule,
+    DatabaseModule,
+    TypeOrmModule.forFeature([UserEntity, GroupEntity, UserLogEntity]),
+  ],
   controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],

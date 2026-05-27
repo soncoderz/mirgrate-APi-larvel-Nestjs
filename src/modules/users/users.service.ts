@@ -62,6 +62,7 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { Request } from "express";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
 import { DatabaseService } from "../../config/database.service";
 
@@ -694,6 +695,7 @@ export class UsersService {
   async addUserAsCompany(
     body: Record<string, any>,
     avatar?: { originalname?: string; buffer?: Buffer },
+    request?: Request,
   ) {
     const validationError = await this.validateCreateCompany(body);
     if (validationError) {
@@ -718,6 +720,14 @@ export class UsersService {
     const setting =
       String(body.groupSetting ?? "groupdefault").trim() || "groupdefault";
     const listModules = await this.readCompanyGroupSettingModules(setting);
+    const createdBy = await this.getRequestUserId(request);
+    const avatarName = avatar ? await this.storeCompanyAvatar(avatar) : null;
+    const userCode = this.isPhpEmpty(body.userCode)
+      ? this.unixNow()
+      : body.userCode;
+    const userPassword = this.isPhpEmpty(body.password)
+      ? ""
+      : await bcrypt.hash(String(body.password), 12);
 
     let newGroupName = `${groupNameInput}-${setting}`;
     const sameGeneratedGroup = await this.database.query<DbRow[]>(
@@ -729,41 +739,33 @@ export class UsersService {
       newGroupName = `${newGroupName}-${sameGeneratedGroup[0].id}`;
     }
 
-    const connection = await this.database.pool("main").getConnection();
-    try {
-      await connection.query("SET SESSION sql_mode = ''");
-      await connection.beginTransaction();
-
+    return this.executeMainTransactionWithRetry(3, async (connection) => {
+      const now = this.nowSql();
       const [groupResult] = await connection.execute<ResultSetHeader>(
         `
-          INSERT INTO \`groups\` (groupName, limitUser, status)
-          VALUES (?, ?, ?)
+          INSERT INTO \`groups\` (groupName, limitUser, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
         `,
-        [newGroupName, 1, "publish"],
+        [newGroupName, 1, "publish", now, now],
       );
 
       const groupId = groupResult.insertId;
-      const avatarName = avatar
-        ? await this.storeCompanyAvatar(avatar)
-        : null;
       const [userResult] = await connection.execute<ResultSetHeader>(
         `
           INSERT INTO users (
             firstName,lastName,userCode,status,mobile,phone,email,password,address,note,
-            role,groupId,loginType,typeId,avatar,created_by
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            role,groupId,loginType,typeId,avatar,created_at,updated_at,created_by
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `,
         [
           this.isPhpEmpty(body.firstName) ? "" : body.firstName,
           this.isPhpEmpty(body.lastName) ? "" : body.lastName,
-          this.isPhpEmpty(body.userCode) ? this.unixNow() : body.userCode,
+          userCode,
           this.isPhpEmpty(body.status) ? "pending" : body.status,
           this.isPhpEmpty(body.mobile) ? "" : body.mobile,
           this.isPhpEmpty(body.phone) ? "" : body.phone,
           this.isPhpEmpty(body.email) ? "" : body.email,
-          this.isPhpEmpty(body.password)
-            ? ""
-            : await bcrypt.hash(String(body.password), 12),
+          userPassword,
           this.isPhpEmpty(body.address) ? "" : body.address,
           this.isPhpEmpty(body.note) ? "" : body.note,
           this.isPhpEmpty(body.role) ? "user" : body.role,
@@ -771,7 +773,9 @@ export class UsersService {
           "website",
           this.isPhpEmpty(body.typeId) ? "" : body.typeId,
           avatarName,
-          0,
+          now,
+          now,
+          createdBy,
         ],
       );
 
@@ -803,18 +807,12 @@ export class UsersService {
         }
       }
 
-      await connection.commit();
       return {
         success: {
           id: userResult.insertId,
         },
       };
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   addUserByExcel(_body: Record<string, any>) {
@@ -1796,7 +1794,7 @@ export class UsersService {
       !this.isEmail(String(body.email ?? ""))
     ) {
       errors.email = "Email khong hop le.";
-    } else if (await this.emailExistsForOtherUser(String(body.email), 0)) {
+    } else if (await this.emailExistsForCreateUser(String(body.email))) {
       errors.email = "Đã tồn tại";
     }
     if (!this.isBetween(body.password, 6, 32)) {
@@ -1841,6 +1839,72 @@ export class UsersService {
     };
   }
 
+  private async executeMainTransactionWithRetry<T>(
+    attempts: number,
+    callback: (connection: PoolConnection) => Promise<T>,
+  ) {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const connection = await this.database.pool("main").getConnection();
+      try {
+        await connection.query("SET SESSION sql_mode = ''");
+        await connection.beginTransaction();
+        const result = await callback(connection);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        lastError = error;
+        try {
+          await connection.rollback();
+        } catch {
+          // Giữ lỗi gốc của transaction giống luồng retry Laravel.
+        }
+        if (attempt >= attempts) {
+          throw error;
+        }
+      } finally {
+        connection.release();
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Không thể thực hiện transaction.");
+  }
+
+  private async getRequestUserId(request?: Request) {
+    const token = this.extractBearerToken(request?.headers.authorization);
+    if (!token || this.blacklist.isInvalidated(token)) {
+      return 0;
+    }
+
+    try {
+      const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
+        secret: this.jwtSecret(),
+        algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
+      });
+      const userId = Number(payload.sub ?? payload.id);
+      return Number.isFinite(userId) && userId > 0 ? userId : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async emailExistsForCreateUser(email: string) {
+    const rows = await this.database.query<DbRow[]>(
+      "main",
+      `
+        SELECT id
+        FROM users
+        WHERE email = ? AND status <> 'trash'
+        LIMIT 1
+      `,
+      [email],
+    );
+    return Boolean(rows[0]);
+  }
+
   private async readCompanyGroupSettingModules(setting: string) {
     try {
       const contents = await readFile(
@@ -1861,6 +1925,8 @@ export class UsersService {
         }
       }
 
+      // Laravel hiện có bug: nếu tìm thấy setting thì lại lấy module ở dòng đầu tiên.
+      // Giữ nguyên behavior này để đảm bảo response/side effect khớp 100%.
       if (!flag && lines[0]) {
         const temp = lines[0].split("-");
         const parsed = JSON.parse(temp[1] ?? "[]");

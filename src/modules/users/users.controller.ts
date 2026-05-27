@@ -49,7 +49,19 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Request } from "express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { MigrationStubService } from "../../common/services/migration-stub.service";
+import {
+  AddUserAsMemberOfCompanyBody,
+  UpdateUserBody,
+  UserIdParams,
+  UsersQueryBody,
+  addUserAsMemberOfCompanySchema,
+  requestUserPayloadSchema,
+  updateUserSchema,
+  userIdParamSchema,
+  usersQuerySchema,
+} from "./schemas/users.schemas";
 import { UsersService } from "./users.service";
 
 /** Type mở rộng Request với thông tin user từ JWT payload */
@@ -58,10 +70,30 @@ type RequestWithUser = Request & { user?: Record<string, unknown> };
 @Controller("v1")
 @UseGuards(JwtAuthGuard)
 export class UsersController {
+  /**
+   * Zod pipe này dùng riêng cho payload JWT đã được `JwtAuthGuard` gắn vào
+   * `request.user`. Các decorator như `@Body()` hoặc `@Param()` không chạy trên
+   * giá trị này, nên controller phải validate thủ công trước khi đưa vào service.
+   */
+  private readonly requestUserPipe = new ZodValidationPipe(
+    requestUserPayloadSchema,
+  );
+
   constructor(
     private readonly stub: MigrationStubService,
     private readonly users: UsersService,
   ) {}
+
+  private parseRequestUser(request: RequestWithUser) {
+    // Khi bật JWT_ALLOW_UNAUTHENTICATED=true ở local, guard có thể cho qua mà
+    // không gắn `request.user`; service hiện vẫn xử lý được trường hợp undefined.
+    return request.user
+      ? (this.requestUserPipe.transform(request.user) as Record<
+          string,
+          unknown
+        >)
+      : undefined;
+  }
 
   private notMigrated(
     action: string,
@@ -91,7 +123,7 @@ export class UsersController {
    */
   @Get("me")
   me(@Req() request: RequestWithUser) {
-    return this.users.me(request.user);
+    return this.users.me(this.parseRequestUser(request));
   }
 
   /**
@@ -107,10 +139,12 @@ export class UsersController {
   @Post("users")
   @HttpCode(200)
   getUsers(
-    @Body() body: Record<string, unknown>,
+    // Validate các tham số phân trang/lọc/sắp xếp ngay ở boundary controller.
+    // Service chỉ còn tập trung build query và xử lý nghiệp vụ.
+    @Body(new ZodValidationPipe(usersQuerySchema)) body: UsersQueryBody,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.getUsers(body, request.user, request);
+    return this.users.getUsers(body, this.parseRequestUser(request), request);
   }
 
   /**
@@ -161,8 +195,11 @@ export class UsersController {
    * Tương đương: UsersController@getUserByID trong Laravel
    */
   @Get("user/:id")
-  getUserByID(@Param("id") id: string) {
-    return this.users.getUserByID(id);
+  getUserByID(
+    // Validate toàn bộ param object để `id` luôn là số hợp lệ trước khi gọi service.
+    @Param(new ZodValidationPipe(userIdParamSchema)) params: UserIdParams,
+  ) {
+    return this.users.getUserByID(String(params.id));
   }
 
   /**
@@ -180,11 +217,13 @@ export class UsersController {
   @HttpCode(200)
   @UseInterceptors(FileInterceptor("avatar"))
   updateUser(
-    @Body() body: Record<string, unknown>,
+    // Với multipart/form-data, Nest parse file qua interceptor; phần text fields
+    // vẫn nằm trong body và được Zod kiểm tra trước khi update database.
+    @Body(new ZodValidationPipe(updateUserSchema)) body: UpdateUserBody,
     @UploadedFile() avatar: any,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.updateUser(body, request.user, avatar);
+    return this.users.updateUser(body, this.parseRequestUser(request), avatar);
   }
 
   /**
@@ -217,11 +256,18 @@ export class UsersController {
   @HttpCode(200)
   @UseInterceptors(FileInterceptor("avatar"))
   addUserAsMemberOfCompany(
-    @Body() body: Record<string, unknown>,
+    // Schema này kiểm tra các field bắt buộc khi tạo user trong công ty; file
+    // avatar được validate riêng trong service vì cần kiểm tra extension/buffer.
+    @Body(new ZodValidationPipe(addUserAsMemberOfCompanySchema))
+    body: AddUserAsMemberOfCompanyBody,
     @UploadedFile() avatar: any,
     @Req() request: RequestWithUser,
   ) {
-    return this.users.addUserAsMemberOfCompany(body, request.user, avatar);
+    return this.users.addUserAsMemberOfCompany(
+      body,
+      this.parseRequestUser(request),
+      avatar,
+    );
   }
 
   /**

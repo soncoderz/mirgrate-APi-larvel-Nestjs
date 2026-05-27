@@ -33,8 +33,12 @@ import {
 } from "@nestjs/common";
 import { Request } from "express";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { MigrationStubService } from "../../common/services/migration-stub.service";
-import { UpsertUserTypeDto } from "./dto/upsert-user-type.dto";
+import {
+  UpsertUserTypeBody,
+  upsertUserTypeSchema,
+} from "./schemas/user-type.schemas";
 import { UserTypesService } from "./user-types.service";
 
 /** Type mở rộng Request với thông tin user từ JWT payload */
@@ -82,7 +86,8 @@ export class UserTypesController {
 
   @Post("insertUserType")
   insertUserType(
-    @Body() body: UpsertUserTypeDto,
+    @Body(new ZodValidationPipe(upsertUserTypeSchema))
+    body: UpsertUserTypeBody,
     @Req() request: RequestWithUser,
   ) {
     return this.userTypes.insertUserType(body, request.user);
@@ -91,7 +96,8 @@ export class UserTypesController {
   @Put("updateUserType/:id")
   updateUserType(
     @Param("id") id: string,
-    @Body() body: UpsertUserTypeDto,
+    @Body(new ZodValidationPipe(upsertUserTypeSchema))
+    body: UpsertUserTypeBody,
     @Req() request: RequestWithUser,
   ) {
     return this.userTypes.updateUserType(id, body, request.user);

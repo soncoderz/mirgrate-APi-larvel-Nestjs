@@ -1,5 +1,16 @@
 # Thiết kế Kiến trúc Hệ thống NestJS (Architecture)
 
+## 0. Cập nhật kiến trúc từ 2026-05-27
+
+- Data access mới dùng TypeORM repository/entity, không viết thêm raw `mysql2`
+  trong endpoint mới/refactor. `DatabaseService` hiện chỉ là bridge cho phần legacy.
+- Validation request mới dùng Zod schema qua `ZodValidationPipe`; không tạo thêm
+  DTO `class-validator` cho phần mới.
+- Response/error mới theo chuẩn NestJS. Laravel chỉ dùng để đối chiếu nghiệp vụ
+  đúng/sai và side effect DB, không còn khóa response shape 100%.
+- Entity được đặt theo module, ví dụ `src/modules/users/entities/*.entity.ts`,
+  thay vì gom toàn bộ vào một thư mục root.
+
 Kiến trúc hệ thống được xây dựng nhằm đảm bảo tính module hóa cao, dễ mở rộng và tương thích tối đa với mô hình cơ sở dữ liệu hiện tại của dự án Laravel.
 
 ## 1. Thiết kế Đa cơ sở dữ liệu (Multi-Database Design)

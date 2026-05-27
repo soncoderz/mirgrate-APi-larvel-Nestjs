@@ -9,6 +9,19 @@ Snapshot ngay 2026-05-26:
 
 - Scaffold NestJS da duoc tao trong target `D:\Thuc Tap\PHP\mirgrate-APi-larvel-Nestjs`.
 - `npm install` da chay thanh cong, `npm run build` da pass.
+- Từ 2026-05-27, hướng migration đổi sang TypeORM + Zod + response/exception chuẩn
+  NestJS. Laravel chỉ dùng để so sánh nghiệp vụ đúng/sai và side effect DB chính,
+  không còn bắt buộc khớp 100% response shape/HTTP status.
+- Đã thêm TypeORM connection `default`, `voice`, `pbx` với `synchronize: false`;
+  đã thêm entity tối thiểu cho `users`, `groups`, `users_log`.
+- Đã thêm `ZodValidationPipe`; các route Auth/User mẫu đã dùng Zod ở controller:
+  `POST /api/v1/login`, `POST /api/v1/logout`, `GET /api/v1/me`,
+  `POST /api/v1/users`, `GET /api/v1/user/:id`, `POST /api/v1/updateUser`,
+  `POST /api/v1/addUserAsMemberOfCompany`, `POST /api/v1/addUserAsCompany`.
+- Đã thêm comment giải thích luồng Zod validation trong `UsersController` và
+  `ZodValidationPipe`, đặc biệt cách validate `request.user` từ JWT và body multipart.
+- Đã gỡ global `ValidationPipe`, `class-validator`, `class-transformer` và các DTO
+  class-validator cũ; endpoint refactor tiếp theo phải dùng Zod.
 - Code da co route/module cho full API set, endpoint chua migrate tra `501 NOT_MIGRATED`.
 - Auth/User da code logic cho nhom endpoint core va them cac endpoint:
   `updateUserInfoByField`, `getUserNameByAgentsView`, `getUserTeam`,
@@ -33,12 +46,15 @@ Snapshot ngay 2026-05-26:
   chua co DDL table nay nen service guard de tranh crash tren DB imported hien tai.
 - `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), lay custom claims va verify lai JWT token truoc khi tra ve, kiem tra group locked, va superadmin getQueueAndAgents.
 - `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan validate (address, note, status), thay doi default userCode sang `unixNow()`, dong bo sync `JnTUserAccessScopes` cho regions/branches/departments, insert `qrcode_mifone` neu co `emailqr`, ho tro upload avatar vao file system va update columns, sync `departments.extensions`, dong thoi comment `user_config` giong nhu Laravel code.
-- `POST /api/v1/addUserAsCompany` da cap nhat theo Laravel: validate `Helper::checkParams`
-  style, duplicate `groupName` tra 406, doc `storage/group_setting/file.txt`, tao group
-  `groupName-setting`, `limitUser = 1`, `status = publish`, tao user role default `user`,
-  avatar chi chap nhan `jpg/png/gif`, transaction insert `user_module` va 3 demo customers,
-  success HTTP 201, validation body HTTP 200; transaction set `sql_mode=''` de match
-  Laravel `strict => false`.
+- `POST /api/v1/addUserAsCompany` đã cập nhật theo Laravel: validate `Helper::checkParams`
+  style, duplicate `groupName` trả 406, unique email chỉ tính `users.status <> 'trash'`,
+  đọc `storage/group_setting/file.txt`, giữ nguyên bug PHP của `groupSetting` để khớp
+  side effect, tạo group `groupName-setting`, `limitUser = 1`, `status = publish`,
+  tạo user role default `user`, lấy `created_by` từ JWT nếu request có Bearer token
+  và fallback `0` giống `getUserId()` Laravel, set `created_at`/`updated_at` khi insert,
+  avatar chỉ chấp nhận `jpg/png/gif` và lưu `img/user_avatar/<Y-m-d-h-i-s>-<originalName>`,
+  transaction retry 3 lần, insert `user_module` và 3 demo customers, success HTTP 201,
+  validation body HTTP 200; transaction set `sql_mode=''` để match Laravel `strict => false`.
 - Trang thai cua cac endpoint da code la `CODED_PENDING_POSTMAN`, chua mark `DONE`
   cho den khi co Postman parity voi Laravel.
 - `getUserModuleShow`, `UpsertUserTeam`, `deleteTeam`, config trunk PDS va blacklist
@@ -71,7 +87,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | CODED_PENDING_POSTMAN | `POST /api/v1/resetPassword` | `UsersController@resetPassword` | Password verify + update |
 | CODED_PENDING_POSTMAN | `POST /api/v1/forgotPassword` | `UsersController@forgotPassword` | Email/reset token behavior |
 | CODED_PENDING_POSTMAN | `POST /api/v1/changePasswordForgot` | `UsersController@changePasswordForgot` | Reset password by token |
-| CODED_PENDING_POSTMAN | `POST /api/v1/addUserAsCompany` | `UsersController@addUserAsCompany` | Create group/user/modules/demo customers per Laravel |
+| CODED_PENDING_POSTMAN | `POST /api/v1/addUserAsCompany` | `UsersController@addUserAsCompany` | Create group/user/modules/demo customers; retry transaction 3 lần, `created_by` theo JWT nếu có |
 | CODED_PENDING_POSTMAN | `POST /api/v1/users` | `UsersController@getUsers` | Match Laravel select/join/filter/sort/paginator shape |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByRole` | `UsersController@getUsersByRole` | Role filter |
 | CODED_PENDING_POSTMAN | `POST /api/v1/usersByExt` | `UsersController@getUserInfoByExtension` | Also used by connector |

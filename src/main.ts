@@ -10,12 +10,11 @@
  * 1. Tạo instance ứng dụng NestJS từ AppModule (module gốc)
  * 2. Cấu hình global prefix cho API (mặc định: '/api')
  * 3. Bật CORS (Cross-Origin Resource Sharing) cho phép frontend gọi API
- * 4. Đăng ký ValidationPipe toàn cục để tự động validate DTO
+ * 4. Validation mới dùng ZodValidationPipe tại từng route cần validate
  * 5. Đăng ký HttpExceptionFilter để xử lý lỗi thống nhất
  * 6. Lắng nghe trên port được cấu hình (mặc định: 3002)
  */
 
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -62,19 +61,8 @@ async function bootstrap() {
     next();
   });
 
-  // Đăng ký ValidationPipe toàn cục
-  // - transform: true → tự động chuyển đổi kiểu dữ liệu (string → number, ...)
-  // - whitelist: false → KHÔNG loại bỏ các property không có trong DTO
-  //   (giữ false vì project dùng Record<string, unknown> làm body type)
-  // - forbidUnknownValues: false → cho phép giá trị không xác định
-  // Tương đương với middleware validate trong Laravel
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: false,
-      forbidUnknownValues: false,
-    }),
-  );
+  // Validation chuẩn mới dùng ZodValidationPipe tại controller/route.
+  // Không đăng ký ValidationPipe toàn cục để tránh phụ thuộc class-validator.
 
   // Đăng ký filter bắt lỗi toàn cục
   // Tất cả exception sẽ được HttpExceptionFilter xử lý và trả về format thống nhất

@@ -6,8 +6,9 @@ Muc tieu cua file nay la lap ke hoach hoan thanh toan bo API dang active trong
 Quy tac goc:
 
 - Chi migrate active routes, khong migrate routes dang comment tru khi co yeu cau rieng.
-- Giu 100% Laravel compatibility ve method, path, request, response, HTTP status va side effects.
-- Lam tung endpoint chac, co Postman parity, roi moi mark `DONE`.
+- Tu 2026-05-27: giu method/path/request on dinh, nhung response/error theo chuan NestJS.
+- Laravel chi dung de doi chieu nghiep vu dung/sai va side effect DB chinh, khong con la source-of-truth cho response shape.
+- Lam tung endpoint chac, refactor sang TypeORM + Zod, co Postman doi chieu, roi moi mark `DONE`.
 - Target code chinh: `D:\Thuc Tap\PHP\mirgrate-APi-larvel-Nestjs`.
 - Project `mirgrate-APi-larvel-Nestjs-codex` chi dung de tham khao implementation.
 
@@ -16,6 +17,16 @@ Quy tac goc:
 Snapshot ngay 2026-05-26:
 
 - M0 bootstrap da duoc implement trong target project va `npm run build` pass.
+- TypeORM đã được cấu hình cho 3 connection `default`, `voice`, `pbx` với
+  `synchronize: false`, `autoLoadEntities: true`, `TYPEORM_LOGGING=false`.
+- Zod đã được thêm làm validation chuẩn mới qua `ZodValidationPipe`; các route mẫu
+  đang dùng Zod gồm `login`, `logout`, `me`, `users`, `user/:id`, `updateUser`,
+  `addUserAsMemberOfCompany`, `addUserAsCompany`, `insertUserType`, `updateUserType`.
+- `class-validator`/`class-transformer` và global `ValidationPipe` đã được gỡ khỏi
+  kiến trúc runtime để tránh tạo thêm DTO legacy.
+- Entity TypeORM tối thiểu đã được tạo cho `users`, `groups`, `users_log`,
+  `user_types`, `user_privileges`; `DatabaseService`/`mysql2` chỉ còn là bridge
+  tạm cho endpoint legacy chưa refactor.
 - Full active route set da co NestJS module/controller scaffold.
 - Endpoint chua migrate duoc giu route va tra `501 NOT_MIGRATED` de tranh im lang sai behavior.
 - M1 Auth/User dang `IN_PROGRESS`: core auth/user endpoints da co service logic, them cac endpoint
@@ -34,10 +45,12 @@ Snapshot ngay 2026-05-26:
   `departments.extensions`, va guarded `jnt_user_access_scopes` sync.
 - `POST /api/v1/login` da duoc cap nhat dong bo logic gop `queue_config` tu hotlines, processPrivileges (`isWebRTC`, `isReceiveChat`), verify lai token sau khi sign, check group lock/existence, va getQueueAndAgents cho superadmin.
 - `POST /api/v1/addUserAsMemberOfCompany` da dong bo hoan toan logic validate (address, note, status), default userCode unix timestamp (`unixNow()`), sync `JnTUserAccessScopes` cho scope types, insert `qrcode_mifone`, upload avatar va UPDATE user avatar field, sync `departments.extensions`, va giu `user_config` dang comment giong Laravel.
-- `POST /api/v1/addUserAsCompany` da cap nhat theo Laravel flow: group setting file,
-  generated group name, group/user transaction, `user_module`, demo customers, avatar
-  `jpg/png/gif`, success HTTP 201, validation body HTTP 200, va transaction
-  `sql_mode=''` de match Laravel `strict => false`.
+- `POST /api/v1/addUserAsCompany` đã cập nhật theo Laravel flow: group setting file,
+  generated group name, giữ nguyên bug PHP của `groupSetting`, group/user transaction
+  retry 3 lần, unique email với `status <> 'trash'`, `created_by` lấy từ Bearer token
+  nếu có và fallback `0`, set `created_at`/`updated_at` khi insert, `user_module`,
+  demo customers, avatar `jpg/png/gif` lưu như PHP, success HTTP 201, validation body
+  HTTP 200, và transaction `sql_mode=''` để match Laravel `strict => false`.
 - Quy tac moi: moi lan sua code/behavior/config/guard/Swagger/side effect/blocker phai cap nhat
   migration guide lien quan trong cung luot.
 - Chua endpoint nao duoc mark `DONE` vi chua co Postman collection de doi chieu Laravel vs NestJS.
@@ -167,7 +180,7 @@ Status values:
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/loginExternal` | `UsersController@loginExternal` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/logout` | `UsersController@logout`; invalidates Bearer token |
 | BLOCKED | M1 | POST | `/api/v1/logoutv2` | `UsersController@logoutv2`; verify source/sample |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsCompany` | `UsersController@addUserAsCompany`; group/user/modules/demo customers flow ported |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/addUserAsCompany` | `UsersController@addUserAsCompany`; group/user/modules/demo customers flow ported, retry 3 lần và `created_by` theo JWT nếu có |
 | DEFERRED | M8 | POST | `/api/v1/addUserByExcel` | `UsersController@addUserByExcel` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/resetPassword` | `UsersController@resetPassword` |
 

@@ -13,7 +13,7 @@
 - **Dynamic Table Selection**: Kỹ năng viết truy vấn SQL động để tự động chọn bảng đích (`cdr` hoặc `cdr_monthly`) dựa trên tham số thời gian truyền lên.
 
 ## 3. TypeScript & REST API Standards
-- **Data Transfer Object (DTO)**: Sử dụng các thư viện `class-validator` và `class-transformer` để kiểm tra và định dạng dữ liệu đầu vào (Request Validation).
+- **Zod Schema Validation**: Sử dụng `zod` và `ZodValidationPipe` để kiểm tra, parse và chuẩn hóa dữ liệu đầu vào theo từng route.
 - **TypeScript Type Safety**: Tránh lạm dụng kiểu `any`. Thiết lập các `interface` hoặc `type` rõ ràng cho kết quả trả về từ database.
 - **RESTful API**: Khai báo Controller với các HttpMethod (`@Get`, `@Post`, `@Put`, `@Delete`), sử dụng `@Param`, `@Body`, `@Query`, `@Headers` để đón nhận dữ liệu.
 
@@ -26,5 +26,5 @@
 ## 5. Câu hỏi Ôn tập & Tự đánh giá (Skills Review Questions)
 1. **Dependency Injection**: Làm thế nào để tiêm (inject) một Repository thuộc kết nối database phụ (ví dụ: `'voice_server_1'`) vào một Service? Cú pháp decorator trong NestJS là gì?
 2. **Lifecycle Hooks**: Tại sao lifecycle hook `onModuleDestroy` lại quan trọng trong việc đóng các kết nối database (Connection Pools) khi dừng ứng dụng? Điều gì xảy ra nếu bỏ qua bước này?
-3. **Validation**: Làm thế nào để validate một trường dữ liệu dạng mảng các chuỗi (ví dụ: danh sách số điện thoại `phones: string[]`) sử dụng `class-validator`?
+3. **Validation**: Làm thế nào để validate một trường dữ liệu dạng mảng các chuỗi (ví dụ: danh sách số điện thoại `phones: string[]`) sử dụng Zod?
 4. **Performance**: Việc trả về dữ liệu dưới dạng Stream (sử dụng `exceljs` write stream) mang lại lợi ích gì về mặt tài nguyên hệ thống (CPU/RAM) so với việc đọc hết dữ liệu vào mảng rồi ghi file trực tiếp?
