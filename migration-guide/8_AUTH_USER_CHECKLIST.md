@@ -28,8 +28,10 @@ Snapshot ngay 2026-05-26:
   `deleteUser`, `deleteUsers`, `duplicateUser`, `logoutUserManual`.
 - `POST /api/v1/logout` da cap nhat de invalidate JWT hien tai bang in-memory blacklist,
   clear `users.remember_token`, va update `users_log` theo Laravel behavior.
-- `POST /api/v1/checkToken` da check JWT blacklist, token da logout se tra
-  `{ message: "Token is invalid", code: 401 }`.
+- `POST /api/v1/checkToken` da implement theo route Laravel map toi
+  `UsersController@me`: parse token tu Authorization/query/body, tra
+  `{ message: "Success", code: 200 }` neu hop le; loi tra HTTP 200 body
+  `Token has expired` / `Token is invalid` / `Token is missing` / `User not found`.
 - `POST /api/v1/users` da cap nhat query theo Laravel `getUsers`: select `users.*`
   kem `departmentName`, `typeName`, `groupName`, `emailqr`, `created_name`,
   `updated_name`, `is_hotdesk`, `transports`, `port`, `is_google2fa`; ho tro
@@ -81,7 +83,7 @@ Lam theo dung thu tu nay de giam dependency risk.
 | --- | --- | --- | --- |
 | CODED_PENDING_POSTMAN | `POST /api/v1/login` | `UsersController@login` | Tao JWT, update login state, ghi `users_log` |
 | CODED_PENDING_POSTMAN | `GET /api/v1/me` | `UsersController@me` | Protected route |
-| CODED_PENDING_POSTMAN | `POST /api/v1/checkToken` | route maps to `UsersController@me` | Phai match route Laravel, reject token da bi logout/blacklist |
+| CODED_PENDING_POSTMAN | `POST /api/v1/checkToken` | route maps to `UsersController@me` | Parse token tu request, reject token da bi logout/blacklist bang `{ message: "Token is invalid", code: 401 }` |
 | CODED_PENDING_POSTMAN | `POST /api/v1/logout` | `UsersController@logout` | Invalidate Bearer token, clear `remember_token`, update `users_log` |
 | CODED_PENDING_POSTMAN | `POST /api/v1/getUserToken` | `UsersController@getUserToken` | Token API integration |
 | CODED_PENDING_POSTMAN | `POST /api/v1/resetPassword` | `UsersController@resetPassword` | Password verify + update |

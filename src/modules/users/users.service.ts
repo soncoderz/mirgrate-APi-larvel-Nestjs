@@ -348,6 +348,52 @@ export class UsersService {
   }
 
   /**
+   * Kiểm tra JWT giống Laravel UsersController@me: parseToken()->authenticate().
+   */
+  async checkToken(request: Request) {
+    const token = this.extractRequestToken(request);
+    if (!token) {
+      return { message: "Token is missing", code: HttpStatus.UNAUTHORIZED };
+    }
+
+    if (this.blacklist.isInvalidated(token)) {
+      return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
+    }
+
+    const secret = this.jwtSecret();
+    try {
+      const payload = await this.jwt.verifyAsync<
+        AuthPayload & Record<string, unknown>
+      >(token, {
+        secret,
+        algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
+      });
+      const requiredClaims = ["iss", "iat", "exp", "nbf", "sub", "jti"];
+      if (requiredClaims.some((claim) => payload[claim] === undefined)) {
+        return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
+      }
+
+      const userId = Number(payload.sub ?? payload.id);
+      const user =
+        Number.isFinite(userId) && userId > 0
+          ? await this.findUserById(userId, false, true)
+          : undefined;
+      if (!user) {
+        return { message: "User not found", code: HttpStatus.UNAUTHORIZED };
+      }
+
+      return { message: "Success", code: HttpStatus.OK };
+    } catch (error) {
+      const errorName = error instanceof Error ? error.name : "";
+      if (errorName === "TokenExpiredError") {
+        return { message: "Token has expired", code: HttpStatus.UNAUTHORIZED };
+      }
+
+      return { message: "Token is invalid", code: HttpStatus.UNAUTHORIZED };
+    }
+  }
+
+  /**
    * Kiểm tra payload JWT hiện tại và trả về trạng thái đơn giản cho endpoint /me.
    */
   async me(payload: AuthPayload | undefined) {
@@ -631,6 +677,29 @@ export class UsersService {
   private extractBearerToken(authorization?: string): string | undefined {
     const [type, token] = authorization?.split(" ") ?? [];
     return type?.toLowerCase() === "bearer" ? token : undefined;
+  }
+
+  /**
+   * Parse token theo chain mặc định của JWTAuth: Authorization, query token, body token.
+   */
+  private extractRequestToken(request: Request): string | undefined {
+    const queryToken = (request.query as Record<string, unknown> | undefined)
+      ?.token;
+    const bodyToken = (request.body as Record<string, unknown> | undefined)
+      ?.token;
+
+    for (const rawToken of [
+      this.extractBearerToken(request.headers.authorization),
+      queryToken,
+      bodyToken,
+    ]) {
+      const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+      if (!this.isPhpEmpty(token)) {
+        return String(token);
+      }
+    }
+
+    return undefined;
   }
 
   /**

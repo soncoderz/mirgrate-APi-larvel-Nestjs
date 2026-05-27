@@ -35,7 +35,9 @@ Snapshot ngay 2026-05-26:
 - Swagger da duoc cau hinh tai `SWAGGER_PATH` mac dinh `api/docs` de test API.
 - Logout da co JWT blacklist in-memory de reject token sau khi logout; neu can parity qua restart,
   can nang cap blacklist sang Redis/DB.
-- `POST /api/v1/checkToken` cung check JWT blacklist de token da logout tra `code: 401`.
+- `POST /api/v1/checkToken` match route Laravel map toi `UsersController@me`:
+  parse token tu Authorization/query/body, tra `{ message, code }`; token da
+  logout/blacklist tra `{ message: "Token is invalid", code: 401 }`.
 - `POST /api/v1/users` da cap nhat parity voi Laravel `getUsers`: full select/join fields,
   filter/sort Laravel format, `recordsOnPage` 406 validation, paginator URL/links
   gom `links[].page`, va datetime string format theo Laravel.
@@ -140,7 +142,7 @@ CDR/Queue advanced phai de `BLOCKED` den khi co voice DB schema that.
 
 Phai ghi status rieng:
 
-- `POST /api/v1/checkToken` maps to `UsersController@me`.
+- Active Laravel route `POST /api/v1/checkToken` maps to `UsersController@me`.
 - `POST /api/v1/loginv2` maps to `UsersController@loginv3`, but `loginv3` is not found in source.
 - `POST /api/v1/deleteUserTypes` is declared twice.
 - `POST /api/v1/getUserModuleShow` imports `UserModuleShow`, but model/table is missing.
@@ -171,7 +173,7 @@ Status values:
 | Status | Phase | Method | Path | Laravel source |
 | --- | --- | --- | --- | --- |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/forgotPassword` | `UsersController@forgotPassword` |
-| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkToken` | `UsersController@me`; checks JWT blacklist |
+| CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkToken` | route maps to `UsersController@me`; checks JWT blacklist |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/checkRecaptcha` | `UsersController@checkRecaptcha` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/changePasswordForgot` | `UsersController@changePasswordForgot` |
 | CODED_PENDING_POSTMAN | M1 | POST | `/api/v1/getUserToken` | `UsersController@getUserToken` |

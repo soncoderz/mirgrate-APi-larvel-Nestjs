@@ -103,7 +103,7 @@ Quyet dinh: NestJS phai giu dung behavior Laravel hien tai de dam bao 100% compa
 
 ### 3.4. Route inconsistencies phai duoc ghi nhan
 
-- `POST /api/v1/checkToken` trong route Laravel map toi `UsersController@me`, khong phai `checkToken`.
+- `POST /api/v1/checkToken` trong route Laravel map toi `UsersController@me`; NestJS phai tra `{ message, code }` giong `me()`.
 - `POST /api/v1/deleteUserTypes` bi khai bao 2 lan.
 - `POST /api/v1/loginv2` map toi `UsersController@loginv3`, nhung source hien tai khong tim thay method `loginv3`.
 

@@ -10,6 +10,7 @@
  *
  * Route ĐÃ MIGRATE (logic hoàn chỉnh):
  * - GET  /api/v1/me                   → Lấy thông tin user đang đăng nhập
+ * - POST /api/v1/checkToken           → Kiểm tra token theo logic UsersController@me
  * - POST /api/v1/users                → Danh sách user có phân trang
  * - POST /api/v1/usersByRole          → Danh sách user theo role
  * - POST /api/v1/usersByExt           → Thông tin user theo extension
@@ -123,7 +124,7 @@ export class UsersController {
 
   /**
    * POST /api/v1/logout
-   * Đăng xuất - cập nhật trạng thái offline vcheckTokenà ghi log
+   * Đăng xuất - cập nhật trạng thái offline và ghi log
    *
    * @param body - { id?: number } - ID của user_log record
    * @param request - Express Request (để lấy token từ header)
@@ -138,6 +139,21 @@ export class UsersController {
     @Req() request: Request,
   ) {
     return this.users.logout(body, request);
+  }
+
+  /**
+   * POST /api/v1/checkToken
+   * Kiểm tra token theo logic Laravel UsersController@me
+   *
+   * @param request - Express Request chứa token trong Authorization, query token hoặc body token
+   * @returns { message, code } theo đúng response của Laravel me()
+   *
+   * Tương đương: route Laravel `checkToken` map tới UsersController@me
+   */
+  @Post("checkToken")
+  @HttpCode(200)
+  checkToken(@Req() request: Request) {
+    return this.users.checkToken(request);
   }
 
   /**
