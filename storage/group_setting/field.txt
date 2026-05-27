@@ -1,0 +1,2 @@
+["id","customerCode","firstName","lastName","phone","email","address","note","status","created_at"]
+{"id":true,"customerCode":true,"firstName":true,"lastName":true,"phone":true,"email":true,"address":true,"note":true,"status":true,"created_at":true}
