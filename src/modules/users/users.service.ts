@@ -3,33 +3,23 @@
  * users.service.ts - Service quản lý người dùng (Users) - FILE LỚN NHẤT
  * =============================================================================
  *
- * Service chứa toàn bộ logic cho module Users.
- * Đã được chuyển đổi hoàn toàn sang TypeORM và Zod Validation.
- * Theo sát các quy định trong tài liệu hướng dẫn chuyển đổi:
- * - migration-guide/2_RULES.md (Quy tắc tương thích và an toàn dữ liệu)
- * - migration-guide/8_AUTH_USER_CHECKLIST.md (Checklist hoàn thiện Auth/User)
- * - migration-guide/9_FULL_API_MIGRATION_PLAN.md (Kế hoạch migration chi tiết)
- *
  * ═══════════════════════════════════════════════════════════════════
  * NHÓM 1: XÁC THỰC (Authentication)
  * ═══════════════════════════════════════════════════════════════════
- * - login()              → Đăng nhập: Validate thông tin bằng Zod, kiểm tra bcrypt,
- *                          cập nhật trạng thái, ghi log đăng nhập (user_log),
- *                          trả về thông tin JWT Token + User + Group + Privileges.
- * - logout()             → Đăng xuất: Vô hiệu hóa token, hủy remember_token,
- *                          cập nhật trạng thái log sang sign-out.
+ * - login()              → Đăng nhập: validate credentials, tạo JWT token,
+ *                          ghi user_log, trả về thông tin user + group + privileges
+ * - logout()             → Đăng xuất: cập nhật isOnline, ghi log
  *
  * ═══════════════════════════════════════════════════════════════════
  * NHÓM 2: CRUD NGƯỜI DÙNG
  * ═══════════════════════════════════════════════════════════════════
- * - me()                 → Lấy thông tin user hiện tại đang đăng nhập.
- * - getUsers()           → Danh sách users phân trang + tìm kiếm + sắp xếp + lọc
- *                          dùng SelectQueryBuilder của TypeORM.
- * - getUserByID()        → Xem chi tiết thông tin của 1 user.
- * - updateUser()         → Cập nhật thông tin user, upload avatar, cấu hình SIP,
- *                          đồng bộ scope truy cập (JnTUserAccessScopes) và ghi lịch sử.
- * - addUserAsMemberOfCompany() → Thêm thành viên mới vào công ty/group, kiểm tra giới hạn
- *                                số lượng thành viên (capacity check), đồng bộ phòng ban.
+ * - me()                 → Lấy thông tin user đang đăng nhập + group + privileges
+ * - getUsers()           → Danh sách users phân trang + search + sort + filter
+ * - getUserByID()        → Chi tiết 1 user + group + privileges
+ * - updateUser()         → Cập nhật thông tin user (update + SIP account)
+ * - addUserAsMemberOfCompany() → Thêm user vào company
+ *
+ * Tương đương: UsersController.php + UserModel.php trong Laravel
  */
 
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
@@ -40,25 +30,21 @@ import { createHash, randomBytes } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { Request } from "express";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, EntityManager, Not, Brackets, SelectQueryBuilder, Between, In } from "typeorm";
+import { Not, Brackets, SelectQueryBuilder, Between, In } from "typeorm";
 import { JwtBlacklistService } from "../../common/services/jwt-blacklist.service";
 import { UserEntity } from "./entities/user.entity";
-import { GroupEntity } from "./entities/group.entity";
 import { UserLogEntity } from "./entities/user-log.entity";
-import {
-  updateUserSchema,
-  addUserAsMemberOfCompanySchema
-} from "./schemas/users.schemas";
-
+import { updateUserSchema } from "./dto/update-user.dto";
+import { addUserAsMemberOfCompanySchema } from "./dto/create-user.dto";
+import { UsersRepository } from "./repositories/users.repository";
 /** Type alias cho database row kết quả query dạng key-value */
-type DbRow = Record<string, any>;
+export type DbRow = Record<string, any>;
 
 /**
  * AuthPayload - Cấu trúc dữ liệu được lưu trữ trong JWT token.
  * Giải mã thông qua JwtAuthGuard để xác định danh tính user đang thao tác.
  */
-type AuthPayload = {
+export type AuthPayload = {
   sub?: number;      // ID người dùng (theo tiêu chuẩn JWT)
   id?: number;       // ID người dùng (backward compatibility với hệ thống cũ)
   email?: string;    // Email đăng nhập
@@ -72,7 +58,7 @@ type AuthPayload = {
  * KHÔNG SELECT cột 'password' và 'remember_token' để tránh rò rỉ dữ liệu nhạy cảm.
  * Tương đương với thuộc tính $hidden trong Eloquent Model của Laravel.
  */
-const USER_SAFE_SELECT = `
+export const USER_SAFE_SELECT = `
   id,userCode,firstName,lastName,mobile,phone,avatar,email,typeId,groupId,
   lastLogin,loginType,status,address,extension,extensions_view,agents_view,
   queues,queues_config,note,role,isOnline,created_at,created_by,updated_at,
@@ -82,7 +68,7 @@ const USER_SAFE_SELECT = `
 `;
 
 /** Danh sách các trường có phép thay đổi khi cập nhật thông tin user */
-const USER_MUTABLE_COLUMNS = new Set([
+export const USER_MUTABLE_COLUMNS = new Set([
   "firstName",
   "lastName",
   "userCode",
@@ -110,7 +96,7 @@ const USER_MUTABLE_COLUMNS = new Set([
 ]);
 
 /** Danh sách toàn bộ các cột trong bảng users dùng cho mục đích lọc và sắp xếp động */
-const USER_TABLE_COLUMNS = new Set([
+export const USER_TABLE_COLUMNS = new Set([
   "id",
   "userCode",
   "firstName",
@@ -157,7 +143,7 @@ const USER_TABLE_COLUMNS = new Set([
 ]);
 
 /** Các kiểu toán tử lọc động được hỗ trợ trong API danh sách users */
-const USER_FILTER_TYPES = new Set([
+export const USER_FILTER_TYPES = new Set([
   "like",
   "like_left",
   "like_right",
@@ -174,30 +160,17 @@ const USER_FILTER_TYPES = new Set([
 @Injectable()
 export class UsersService {
   constructor(
-    @InjectRepository(UserEntity)
-    private readonly userRepository: Repository<UserEntity>,
-    @InjectRepository(GroupEntity)
-    private readonly groupRepository: Repository<GroupEntity>,
-    @InjectRepository(UserLogEntity)
-    private readonly userLogRepository: Repository<UserLogEntity>,
-    private readonly entityManager: EntityManager,
+    private readonly usersRepo: UsersRepository,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly blacklist: JwtBlacklistService,
   ) {}
 
-  /**
-   * POST /api/v1/login
-   * Xử lý đăng nhập hệ thống: kiểm tra thông tin, so khớp password, ghi log đăng nhập.
-   * Đồng thời gộp thông tin cấu hình queue, extension của hotline và quyền hạn.
-   * Ánh xạ TypeORM: Sử dụng UserRepository và UserLogRepository thay thế mysql2 thô.
-   */
   async login(body: Record<string, any>, request: Request) {
     const email = String(body.email ?? "").trim();
     const password = String(body.password ?? "");
     const clientIp = this.getClientIp(request);
 
-    // 1. Kiểm tra trống email/password
     if (!email || !password) {
       await this.insertUserLog({
         username: email,
@@ -210,7 +183,6 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
-    // 2. Tìm kiếm user theo email
     const user = await this.findUserByEmail(email);
     if (!user) {
       await this.insertUserLog({
@@ -224,7 +196,6 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
-    // 3. So khớp mật khẩu bcrypt (có hỗ trợ tiền tố $2y$ của Laravel PHP)
     const passwordMatches = await bcrypt.compare(
       password,
       this.normalizeBcryptHash(user.password),
@@ -241,7 +212,6 @@ export class UsersService {
       throw new HttpException({ error: "Invalid credentials" }, HttpStatus.UNAUTHORIZED);
     }
 
-    // 4. Kiểm tra trạng thái tài khoản
     if (user.status !== "active") {
       await this.insertUserLog({
         username: email,
@@ -252,14 +222,12 @@ export class UsersService {
       this.throwLockedAccount();
     }
 
-    // 5. Tạo token JWT đồng bộ claim set với Laravel
     const token = await this.signUserToken(
       user,
       Boolean(body.remember_token),
       request,
     );
 
-    // Verify ngược lại token để trích xuất payload
     const payload = await this.jwt.verifyAsync<AuthPayload>(token, {
       secret: this.jwtSecret(),
       algorithms: [this.config.get<string>("JWT_ALGO", "HS256") as never],
@@ -272,13 +240,11 @@ export class UsersService {
       );
     }
 
-    // 6. Kiểm tra trạng thái hoạt động của Group/Company
     const group = curUser.groupId ? await this.getGroupForLogin(curUser.groupId) : null;
     if (!group || group.status === "lock") {
       this.throwLockedAccount();
     }
 
-    // Ghi log đăng nhập thành công
     const userLog = await this.insertUserLog({
       username: email,
       password,
@@ -288,8 +254,7 @@ export class UsersService {
       sign_in_time: this.unixNow(),
     });
 
-    // Cập nhật trạng thái hoạt động trực tuyến của User
-    await this.userRepository.update(curUser.id, {
+    await this.usersRepo.user.update(curUser.id, {
       lastLogin: this.nowSql(),
       isOnline: 1,
     });
@@ -302,7 +267,6 @@ export class UsersService {
     );
     const groupHotline = curUser.groupId ? await this.getGroupHotline(curUser.groupId) : [];
 
-    // Gộp cấu hình queue từ hotline của group
     for (const value of groupHotline) {
       if (value.queue_config && this.isJson(value.queue_config)) {
         this.assignMissing(queueConfig, JSON.parse(value.queue_config));
@@ -328,10 +292,6 @@ export class UsersService {
     };
   }
 
-  /**
-   * POST /api/v1/logout
-   * Đăng xuất: Vô hiệu hóa token (in-memory blacklist), hủy remember_token, cập nhật sign-out log.
-   */
   async logout(body: Record<string, any>, request: Request) {
     const token = this.extractBearerToken(request.headers.authorization);
     if (!token) {
@@ -362,7 +322,7 @@ export class UsersService {
     const userId = Number(payload.sub ?? payload.id);
     const user =
       Number.isFinite(userId) && userId > 0
-        ? await this.userRepository.findOne({
+        ? await this.usersRepo.user.findOne({
             select: { id: true, remember_token: true },
             where: { id: userId },
           })
@@ -374,14 +334,13 @@ export class UsersService {
           await this.invalidateStoredToken(String(user.remember_token));
         }
 
-        await this.userRepository.update(user.id, {
+        await this.usersRepo.user.update(user.id, {
           remember_token: null,
         });
       }
 
-      // Cập nhật log đăng nhập sang trạng thái sign-out
       if (log.status === "sign-in") {
-        await this.userLogRepository.update(logId, {
+        await this.usersRepo.log.update(logId, {
           status: "sign-out",
           sign_out_time: this.unixNow(),
           updated_at: this.nowSql(),
@@ -389,16 +348,11 @@ export class UsersService {
       }
     }
 
-    // Đưa token hiện tại vào blacklist để vô hiệu hóa
     this.invalidateToken(token, (payload as { exp?: number }).exp);
 
     return { message: "Logout success", code: 200 };
   }
 
-  /**
-   * GET /api/v1/me
-   * Lấy thông tin user hiện tại từ token JWT.
-   */
   async me(payload: AuthPayload | undefined) {
     const user = await this.getCurrentUser(payload);
     if (!user) {
@@ -408,11 +362,6 @@ export class UsersService {
     return { message: "Success", code: 200 };
   }
 
-  /**
-   * POST /api/v1/users
-   * Lấy danh sách users phân trang có tìm kiếm, sắp xếp và lọc động.
-   * Ánh xạ TypeORM: Sử dụng SelectQueryBuilder kết nối nhiều bảng, trả về Laravel-like pagination.
-   */
   async getUsers(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -426,18 +375,15 @@ export class UsersService {
       );
     }
 
-    // Khởi tạo QueryBuilder với tên bảng chính là users
-    const qb = this.userRepository.createQueryBuilder("users")
+    const qb = this.usersRepo.user.createQueryBuilder("users")
       .leftJoin("departments", "departments", "departments.id = users.departmentId")
       .leftJoin("user_types", "user_types", "user_types.id = users.typeId")
       .leftJoin("groups", "groups", "groups.id = users.groupId")
       .leftJoin("qr_code", "qr_code", "qr_code.userId = users.id")
       .leftJoin("user_config", "user_config", "user_config.userid = users.id");
 
-    // Lọc bỏ các tài khoản bị xóa (status = trash)
     qb.where("users.status <> :statusTrash", { statusTrash: "trash" });
 
-    // Kiểm tra quyền hạn lọc GroupId theo người dùng hiện tại
     if (currentUser?.role !== "superadmin") {
       if (!this.isPhpEmpty(body.groupId)) {
         qb.andWhere("users.groupId = :groupId", { groupId: body.groupId });
@@ -462,7 +408,6 @@ export class UsersService {
       qb.andWhere("users.role = :roleId", { roleId: body.roleId });
     }
 
-    // Hỗ trợ tìm kiếm từ khóa
     if (!this.isPhpEmpty(body.search) && !Array.isArray(body.search)) {
       const keyword = `%${String(body.search)}%`;
       qb.andWhere(new Brackets(qbSub => {
@@ -475,17 +420,14 @@ export class UsersService {
       }));
     }
 
-    // Áp dụng bộ lọc động từ client
     this.applyUserFilters(body.filters, qb);
 
-    // Đếm tổng số lượng bản ghi khớp điều kiện
     const total = await qb.getCount();
 
     const perPage = this.normalizeLaravelRecordsOnPage(body.recordsOnPage);
     const currentPage = this.normalizePage(body.page ?? 1);
     const offset = (currentPage - 1) * perPage;
 
-    // Chọn các trường cụ thể, bổ sung thông tin join và sub-queries
     qb.select("users.*")
       .addSelect("departments.name", "departmentName")
       .addSelect("user_types.name", "typeName")
@@ -499,7 +441,6 @@ export class UsersService {
 
     qb.limit(perPage).offset(offset);
 
-    // Áp dụng sắp xếp động
     this.applyUserOrder(qb, body.sorts);
 
     const data = await qb.getRawMany();
@@ -508,10 +449,6 @@ export class UsersService {
     return this.paginateLaravel(sanitizedData, total, perPage, currentPage, request);
   }
 
-  /**
-   * GET /api/v1/user/:id
-   * Lấy chi tiết thông tin của một user theo ID.
-   */
   async getUserByID(id: string) {
     const user = await this.findUserById(Number(id), true);
     if (!user) {
@@ -525,11 +462,6 @@ export class UsersService {
     return this.sanitizeUser(user);
   }
 
-  /**
-   * POST /api/v1/updateUser
-   * Cập nhật thông tin user, upload avatar, đồng bộ phòng ban, scope và ghi lịch sử thay đổi.
-   * Ánh xạ Zod: Gọi validateUpdateUserZod trước để kiểm tra tính hợp lệ dữ liệu tầng nghiệp vụ.
-   */
   async updateUser(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
@@ -538,7 +470,7 @@ export class UsersService {
     const userId = Number(body.id);
     const params = this.filteredUpdateUserParams(body);
     
-    // Validate bằng Zod Schema + superRefine (nếu lỗi sẽ ném HttpException 406)
+    // Call Zod validation (throws HttpException 406 on failure)
     await this.validateUpdateUserZod(params, userId);
 
     const user = await this.findRawUserById(userId, true);
@@ -563,10 +495,8 @@ export class UsersService {
     for (const [key, value] of updates.entries()) {
       updateObj[key] = value;
     }
-    // Thực hiện update bản ghi thông qua UserRepository
-    await this.userRepository.update(userId, updateObj);
+    await this.usersRepo.user.update(userId, updateObj);
 
-    // Đồng bộ các thông tin liên quan (scope, config, department, logs)
     await this.syncJntUserAccessScopes(userId, body);
     await this.upsertUserConfig(userId, body, currentUser?.id);
 
@@ -582,17 +512,12 @@ export class UsersService {
     };
   }
 
-  /**
-   * POST /api/v1/addUserAsMemberOfCompany
-   * Thêm thành viên mới vào công ty/group.
-   * Ánh xạ Zod: validateAddMemberOfCompanyZod kiểm tra ràng buộc bao gồm giới hạn số user (limitUser).
-   */
   async addUserAsMemberOfCompany(
     body: Record<string, any>,
     payload: AuthPayload | undefined,
     avatar?: { originalname?: string; buffer?: Buffer },
   ) {
-    // Validate bằng Zod Schema kết hợp DB check (trả về HttpStatus.OK (200) chứa mã lỗi 406 khi có lỗi)
+    // Call Zod validation (throws HttpException 406 wrapped in HttpStatus.OK on failure)
     await this.validateAddMemberOfCompanyZod(body);
 
     const currentUser = await this.getCurrentUser(payload);
@@ -602,8 +527,7 @@ export class UsersService {
         ? await this.nextMideskUserCode()
         : String(body.userCode ?? this.unixNow());
 
-    // Khởi tạo Entity thông qua userRepository.create
-    const newUser = this.userRepository.create({
+    const newUser = this.usersRepo.user.create({
       firstName: body.firstName,
       lastName: body.lastName,
       userCode,
@@ -630,26 +554,26 @@ export class UsersService {
       is_google2fa: body.is_google2fa ?? "disabled",
     });
 
-    const savedUser = await this.userRepository.save(newUser);
+    const savedUser = await this.usersRepo.user.save(newUser);
     const insertedId = savedUser.id;
 
-    // 1. Đồng bộ JnTUserAccessScopes
+    // 1. Đồng bộ JnTUserAccessScopes (list_region, list_branch, list_department)
     await this.syncJntUserAccessScopes(insertedId, body);
 
-    // 2. Insert QRCodeMifone (sử dụng raw query do chưa khai báo Entity)
+    // 2. Insert QRCodeMifone nếu có emailqr
     if (!this.isPhpEmpty(body.emailqr)) {
       if (await this.tableExists("qrcode_mifone")) {
-        await this.entityManager.query(
+        await this.usersRepo.manager.query(
           "INSERT INTO qrcode_mifone (userId, groupId, email) VALUES (?, ?, ?)",
           [insertedId, body.groupId ?? null, String(body.emailqr)],
         );
       }
     }
 
-    // 3. Upload avatar nếu có file đính kèm
+    // 3. Upload avatar nếu có file
     if (avatar?.buffer) {
       const avatarName = await this.storeUserAvatar(insertedId, avatar);
-      await this.userRepository.update(insertedId, { avatar: avatarName });
+      await this.usersRepo.user.update(insertedId, { avatar: avatarName });
     }
 
     const insertedUser = await this.findUserById(insertedId, false, true);
@@ -660,7 +584,7 @@ export class UsersService {
       currentUser,
     );
 
-    // 4. Cập nhật departments.extensions
+    // 4. Update departments.extensions nếu có departmentId và extension
     await this.updateDepartmentExtension(body);
 
     return {
@@ -682,7 +606,7 @@ export class UsersService {
       });
       this.invalidateToken(token, (payload as { exp?: number }).exp);
     } catch {
-      // Laravel JWTAuth::invalidate() bỏ qua lỗi token không hợp lệ ở đây.
+      // Laravel JWTAuth::invalidate() ignores invalid/expired remember_token here.
     }
   }
 
@@ -719,7 +643,7 @@ export class UsersService {
   }
 
   private async findUserByEmail(email: string) {
-    return this.userRepository.findOne({ where: { email } });
+    return this.usersRepo.user.findOne({ where: { email } });
   }
 
   private async findUserById(
@@ -731,7 +655,7 @@ export class UsersService {
       return undefined;
     }
 
-    const user = await this.userRepository.findOne({
+    const user = await this.usersRepo.user.findOne({
       where: {
         id,
         ...(includeTrashed ? {} : { status: Not("trash") as any }),
@@ -762,7 +686,7 @@ export class UsersService {
       return undefined;
     }
 
-    return (await this.userRepository.findOne({
+    return (await this.usersRepo.user.findOne({
       where: {
         id,
         ...(includeTrashed ? {} : { status: Not("trash") as any }),
@@ -776,7 +700,7 @@ export class UsersService {
   }
 
   private async getUserType(id: number) {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       "SELECT * FROM user_types WHERE id = ? LIMIT 1",
       [id],
     );
@@ -784,18 +708,18 @@ export class UsersService {
   }
 
   private async getGroupById(id: number) {
-    return (await this.groupRepository.findOne({ where: { id } })) ?? null;
+    return (await this.usersRepo.group.findOne({ where: { id } })) ?? null;
   }
 
   private async getTableColumns(table: "users") {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       `SHOW COLUMNS FROM \`${table}\``,
     );
     return rows.map((row) => String(row.Field));
   }
 
   private async tableExists(table: string) {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       "SHOW TABLES LIKE ?",
       [table],
     );
@@ -803,11 +727,11 @@ export class UsersService {
   }
 
   private async getGroupForLogin(id: number) {
-    return (await this.groupRepository.findOne({ where: { id } })) ?? null;
+    return (await this.usersRepo.group.findOne({ where: { id } })) ?? null;
   }
 
   private async getGroupHotline(groupId: number) {
-    return this.entityManager.query(
+    return this.usersRepo.manager.query(
       `
         SELECT fixed_number,fixed_provider,hotline_number,hotline_number_price,
                queues,extensions,discount,queue_config
@@ -823,7 +747,7 @@ export class UsersService {
       return [];
     }
 
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       `
         SELECT page, GROUP_CONCAT(action) AS permission
         FROM user_privileges
@@ -901,7 +825,7 @@ export class UsersService {
 
     const queueConfig: Record<string, any> = {};
     if (user.role === "superadmin") {
-      const hotlines = await this.entityManager.query(
+      const hotlines = await this.usersRepo.manager.query(
         "SELECT queues, extensions, queue_config FROM group_hotline",
       );
       const queues: string[] = [];
@@ -919,7 +843,7 @@ export class UsersService {
         }
       }
 
-      const userCodesRows = await this.userRepository.find({
+      const userCodesRows = await this.usersRepo.user.find({
         select: { userCode: true },
         where: { status: Not("trash") as any },
       });
@@ -929,7 +853,7 @@ export class UsersService {
       user.extensions_view = extensions.join(",");
       user.agents_view = agentsViewStr;
 
-      const agents = await this.entityManager.query(
+      const agents = await this.usersRepo.manager.query(
         `
           SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
           FROM users
@@ -939,7 +863,7 @@ export class UsersService {
 
       return [queueConfig, this.keyBy(agents, "extension")];
     } else {
-      const agents = await this.entityManager.query(
+      const agents = await this.usersRepo.manager.query(
         `
           SELECT CONCAT_WS(' ', lastName, firstName) AS name, userCode AS agentId, extension
           FROM users
@@ -953,7 +877,7 @@ export class UsersService {
   }
 
   private async insertUserLog(input: Record<string, any>) {
-    const userLog = this.userLogRepository.create({
+    const userLog = this.usersRepo.log.create({
       groupId: input.groupid ?? null,
       username: String(input.username ?? "").slice(0, 50),
       password: String(input.password ?? "").slice(0, 50),
@@ -966,19 +890,16 @@ export class UsersService {
       userCode: input.userCode ?? null,
     });
 
-    const savedLog = await this.userLogRepository.save(userLog);
+    const savedLog = await this.usersRepo.log.save(userLog);
     return savedLog;
   }
 
   private async findUserLogById(id: number) {
-    return this.userLogRepository.findOne({ where: { id } });
+    return this.usersRepo.log.findOne({ where: { id } });
   }
 
-  /**
-   * Kiểm tra và khóa tạm thời IP Client nếu đăng nhập thất bại liên tục (>= 5 lần) trong ngày.
-   */
   private async handleLoginFail(email: string, ip: string): Promise<never> {
-    const total = await this.userLogRepository.count({
+    const total = await this.usersRepo.log.count({
       where: {
         username: email,
         status: "fail",
@@ -1001,11 +922,8 @@ export class UsersService {
     this.throwInvalidAccount();
   }
 
-  /**
-   * Khóa tài khoản (status = lock) nếu nhập sai mật khẩu liên tục (>= 5 lần) kể từ lần đăng nhập gần nhất.
-   */
   private async handleInvalidPassword(email: string): Promise<never> {
-    const lastLog = await this.userLogRepository.findOne({
+    const lastLog = await this.usersRepo.log.findOne({
       where: {
         username: email,
         status: In(["sign-in", "sign-out"])
@@ -1014,7 +932,7 @@ export class UsersService {
     });
 
     const lastLogin = lastLog?.updated_at ?? this.nowSql();
-    const total = await this.userLogRepository.count({
+    const total = await this.usersRepo.log.count({
       where: {
         username: email,
         status: "fail",
@@ -1023,7 +941,7 @@ export class UsersService {
     });
 
     if (total >= 5) {
-      await this.userRepository.update(
+      await this.usersRepo.user.update(
         { email, status: "active" },
         { status: "lock" }
       );
@@ -1033,20 +951,20 @@ export class UsersService {
   }
 
   private async lockIp(ip: string) {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       "SELECT id FROM ip_lock WHERE ip_client = ? LIMIT 1",
       [ip],
     );
 
     if (rows[0]) {
-      await this.entityManager.query(
+      await this.usersRepo.manager.query(
         "UPDATE ip_lock SET lock_time = ? WHERE id = ?",
         [this.unixNow(), rows[0].id],
       );
       return;
     }
 
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       "INSERT INTO ip_lock (ip_client, lock_time) VALUES (?, ?)",
       [ip, this.unixNow()],
     );
@@ -1072,16 +990,10 @@ export class UsersService {
     return params;
   }
 
-  /**
-   * Quy trình validate bất đồng bộ qua Zod schema khi cập nhật user:
-   * - Kiểm tra email duy nhất (ngoại trừ bản thân).
-   * - Xác thực sự tồn tại của GroupId trong bảng groups.
-   * - Đảm bảo số lượng thành viên trong Group hoạt động không vượt giới hạn (limitUser).
-   */
   private async validateUpdateUserZod(body: any, userId: number) {
     const schema = updateUserSchema.superRefine(async (data, ctx) => {
       if (data.email) {
-        const emailExists = await this.userRepository.findOne({
+        const emailExists = await this.usersRepo.user.findOne({
           where: { email: data.email, status: Not("trash") as any, id: Not(userId) }
         });
         if (emailExists) {
@@ -1093,7 +1005,7 @@ export class UsersService {
         }
       }
       if (data.groupId) {
-        const group = await this.groupRepository.findOne({
+        const group = await this.usersRepo.group.findOne({
           where: { id: Number(data.groupId), status: Not("trash") as any }
         });
         if (!group) {
@@ -1103,9 +1015,9 @@ export class UsersService {
             message: "Không tồn tại.",
           });
         } else {
-          const currentUser = await this.userRepository.findOne({ where: { id: userId } });
+          const currentUser = await this.usersRepo.user.findOne({ where: { id: userId } });
           if (currentUser && currentUser.status !== "active" && data.status === "active") {
-            const totalActive = await this.userRepository.count({
+            const totalActive = await this.usersRepo.user.count({
               where: { groupId: Number(data.groupId), status: "active" }
             });
             if (totalActive >= Number(group.limitUser ?? 0)) {
@@ -1137,18 +1049,10 @@ export class UsersService {
     }
   }
 
-  /**
-   * Quy trình validate bất đồng bộ qua Zod schema khi thêm thành viên mới:
-   * - Xác nhận mật khẩu trùng khớp (đã xử lý tại schema chính).
-   * - Kiểm tra email duy nhất (không tính status = trash).
-   * - Kiểm tra tính hợp lệ của GroupId.
-   * - Kiểm tra giới hạn số lượng thành viên (capacity check).
-   * Trả về HTTP Code 200 (HttpStatus.OK) kèm body 406 để tương thích với Frontend cũ.
-   */
   private async validateAddMemberOfCompanyZod(body: any) {
     const schema = addUserAsMemberOfCompanySchema.superRefine(async (data, ctx) => {
       if (data.email) {
-        const emailExists = await this.userRepository.findOne({
+        const emailExists = await this.usersRepo.user.findOne({
           where: { email: data.email, status: Not("trash") as any }
         });
         if (emailExists) {
@@ -1160,7 +1064,7 @@ export class UsersService {
         }
       }
       if (data.groupId) {
-        const group = await this.groupRepository.findOne({
+        const group = await this.usersRepo.group.findOne({
           where: { id: Number(data.groupId), status: Not("trash") as any }
         });
         if (!group) {
@@ -1170,7 +1074,7 @@ export class UsersService {
             message: "Không tồn tại.",
           });
         } else {
-          const totalActive = await this.userRepository.count({
+          const totalActive = await this.usersRepo.user.count({
             where: { groupId: Number(data.groupId), status: "active" }
           });
           if (
@@ -1318,13 +1222,13 @@ export class UsersService {
     body: Record<string, any>,
     currentUserId?: number,
   ) {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       "SELECT userid FROM user_config WHERE userid = ? LIMIT 1",
       [userId],
     );
 
     if (rows[0]) {
-      await this.entityManager.query(
+      await this.usersRepo.manager.query(
         `
           UPDATE user_config
           SET is_hotdesk = ?, updated_by = ?, transports = ?, port = ?
@@ -1349,7 +1253,7 @@ export class UsersService {
     body: Record<string, any>,
     currentUserId?: number,
   ) {
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       `
         INSERT INTO user_config
           (userid,groupid,is_hotdesk,transports,port,time_start_auto_resume,created_at,created_by)
@@ -1383,13 +1287,13 @@ export class UsersService {
     };
 
     for (const [type, rawIds] of Object.entries(scopes)) {
-      await this.entityManager.query(
+      await this.usersRepo.manager.query(
         "DELETE FROM jnt_user_access_scopes WHERE user_id = ? AND scope_type = ?",
         [userId, type],
       );
 
       for (const scopeId of this.normalizeScopeIds(rawIds)) {
-        await this.entityManager.query(
+        await this.usersRepo.manager.query(
           "INSERT INTO jnt_user_access_scopes (user_id, scope_type, scope_id) VALUES (?, ?, ?)",
           [userId, type, scopeId],
         );
@@ -1409,7 +1313,7 @@ export class UsersService {
 
     const extension = String(body.extension);
     const newExt = JSON.stringify(extension);
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       `
         UPDATE departments
         SET extensions = REPLACE(REPLACE(REPLACE(REPLACE(extensions, ?, ''), ',,', ','), '[,', '['), ',]', ']')
@@ -1418,7 +1322,7 @@ export class UsersService {
       [newExt, `%${newExt}%`],
     );
 
-    const departments = await this.entityManager.query(
+    const departments = await this.usersRepo.manager.query(
       "SELECT id, extensions FROM departments WHERE id = ? LIMIT 1",
       [body.departmentId],
     );
@@ -1441,7 +1345,7 @@ export class UsersService {
       extensions.push(extension);
     }
 
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       "UPDATE departments SET extensions = ? WHERE id = ?",
       [JSON.stringify(extensions), department.id],
     );
@@ -1478,7 +1382,7 @@ export class UsersService {
       `${currentUser.lastName ?? ""} ${currentUser.firstName ?? ""}`.trim();
     const historyText = `<b>${fullname}</b> đã cập nhật <i>${text.join(",")}</i> cho tài khoản: <b>${newUser.email}</b>`;
 
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       `
         INSERT INTO data_history (action,action_type,data_change,created_by,groupId,text)
         VALUES (?,?,?,?,?,?)
@@ -1515,7 +1419,7 @@ export class UsersService {
         ? JSON.stringify(this.diffUsers(oldUser, newUser))
         : null;
 
-    await this.entityManager.query(
+    await this.usersRepo.manager.query(
       `
         INSERT INTO data_history (action,action_type,data_change,created_by,groupId,text)
         VALUES (?,?,?,?,?,?)
@@ -1544,7 +1448,7 @@ export class UsersService {
   }
 
   private async nextMideskUserCode() {
-    const rows = await this.entityManager.query(
+    const rows = await this.usersRepo.manager.query(
       `
         SELECT CONCAT('0', (CAST(userCode AS UNSIGNED) + 1)) AS userCode
         FROM users

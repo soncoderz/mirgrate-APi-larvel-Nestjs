@@ -52,19 +52,25 @@ import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import {
   AddUserAsMemberOfCompanyBody,
-  UpdateUserBody,
-  UserIdParams,
-  UsersQueryBody,
   addUserAsMemberOfCompanySchema,
-  requestUserPayloadSchema,
+} from "./dto/create-user.dto";
+import {
+  UpdateUserBody,
   updateUserSchema,
-  userIdParamSchema,
-  usersQuerySchema,
+} from "./dto/update-user.dto";
+import {
   LoginBody,
   loginSchema,
   LogoutBody,
   logoutSchema,
-} from "./schemas/users.schemas";
+  requestUserPayloadSchema,
+} from "./dto/auth.dto";
+import {
+  UserIdParams,
+  UsersQueryBody,
+  userIdParamSchema,
+  usersQuerySchema,
+} from "./dto/query.dto";
 import { UsersService } from "./users.service";
 
 /** Type mở rộng Request với thông tin user từ JWT payload */

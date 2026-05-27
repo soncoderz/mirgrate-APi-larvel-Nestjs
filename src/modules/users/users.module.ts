@@ -22,6 +22,7 @@ import { UserLogEntity } from "./entities/user-log.entity";
 import { UserEntity } from "./entities/user.entity";
 import { UsersController } from "./users.controller";
 import { UsersService } from "./users.service";
+import { UsersRepository } from "./repositories/users.repository";
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { UsersService } from "./users.service";
     TypeOrmModule.forFeature([UserEntity, GroupEntity, UserLogEntity]),
   ],
   controllers: [UsersController],
-  providers: [UsersService],
-  exports: [UsersService],
+  providers: [UsersService, UsersRepository],
+  exports: [UsersService, UsersRepository],
 })
 export class UsersModule {}
